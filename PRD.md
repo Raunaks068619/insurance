@@ -17,15 +17,18 @@ dispute a line-item decision.
 For any submitted claim, the system produces — deterministically and within ~100ms on a
 laptop — a per-line-item adjudication consisting of `(status, payable_amount_cents,
 reason_code, explanation_text)`, where `payable_amount` is computed in integer cents by
-applying the member's active coverage rules in a fixed order (eligibility → coverage →
-prior-auth → annual limit → deductible → copay → coinsurance → out-of-pocket maximum);
-the claim's overall status is derived by aggregating its line items; every decision is
-explained by a stable reason code plus a sentence citing the rule and the numbers used;
-the same claim submitted against the same accumulator state always yields the same result;
-and a member can dispute any line item, which reopens it for re-adjudication while
-preserving the original decision as an immutable record. Persisted accumulators (deductible
-met, out-of-pocket met, per-service limit used) carry forward across claims within a plan
-year so limits exhaust correctly.
+applying the member's active coverage rules in a fixed order (eligibility → coverage/exclusion
+→ prior-auth → annual limit → cost-share → out-of-pocket maximum). Each rule carries exactly
+one **cost-share mechanism** — `full_coverage`, `copay`, or `coinsurance` (a discriminated
+union, not a stack of nullable fields) — and exactly one **limit unit** — `none`, `dollars`,
+or `visits`; the cost-share step is a switch on the mechanism (copay services waive the
+deductible, coinsurance services apply it first). The claim's overall status is derived by
+aggregating its line items; every decision is explained by a stable reason code plus a
+sentence citing the rule and the numbers used; the same claim submitted against the same
+accumulator state always yields the same result; and a member can dispute any line item,
+which reopens it for re-adjudication while preserving the original decision as an immutable
+record. Persisted accumulators (deductible met, out-of-pocket met, per-service limit used —
+in the rule's unit) carry forward across claims within a plan year so limits exhaust correctly.
 
 ## In scope (7)
 
@@ -69,7 +72,7 @@ loaded by a seed script, not via the API.
 |---|---|
 | **Member** | The insured person who submits claims under a policy. |
 | **Policy** | The contract binding a member to a set of coverage rules for a plan year, with an effective and termination date. |
-| **Coverage rule** | Data describing how one service type is covered: whether covered, annual limit, deductible applicability, copay, coinsurance rate, prior-auth requirement, exclusions. |
+| **Coverage rule** | Data describing how one service type is covered: covered/excluded, a single cost-share mechanism (`full_coverage` \| `copay` \| `coinsurance`), deductible applicability, a unit-typed annual limit (`none` \| `dollars` \| `visits`), and prior-auth requirement. |
 | **Deductible** | Amount the member pays out of pocket each plan year before the plan starts paying. Tracked by an accumulator. |
 | **Copay** | A fixed dollar amount the member pays per service (e.g. $30 per visit). |
 | **Coinsurance** | A percentage of the allowed amount the member pays after the deductible (e.g. plan pays 80%, member pays 20%). |
@@ -79,12 +82,55 @@ loaded by a seed script, not via the API.
 | **CARC** | Claim Adjustment Reason Code — the industry's standardized code for *why* an amount was adjusted/denied. Our `ReasonCode` enum is a simplified, internal analog. |
 | **RARC** | Remittance Advice Remark Code — supplementary remark accompanying a CARC. Out of scope to model fully; noted for vocabulary fidelity. |
 
+## Coverage rule shape (v1) — grounded in real-insurer research
+
+Coverage rules are typed config records (see `ai-artifacts/02-domain-research/`). Shape:
+
+```ts
+type CoverageRule = {
+  policy_id: string;
+  service_code: string;          // closed catalog; unlisted code → NO_COVERAGE
+  covered: boolean;
+  excluded: boolean;             // explicit EXCLUDED beats "not covered"
+  cost_share:
+    | { type: "full_coverage" }                 // plan pays 100% (e.g. preventive)
+    | { type: "copay"; copay_cents: number }    // flat per-service charge
+    | { type: "coinsurance"; rate: number };    // member share, 0.0–1.0
+  applies_deductible: boolean;   // copay → usually false; coinsurance → usually true
+  limit:
+    | { unit: "none" }
+    | { unit: "dollars"; amount_cents: number } // "$Y/yr" — the brief's example
+    | { unit: "visits"; count: number };        // "20 PT visits/yr" — the #1 real limit
+  requires_prior_auth: boolean;
+};
+```
+
+**Seed coverage set (12 rules — exercises every adjudication branch):**
+
+| Service | Cost-share | Deductible | Limit | Prior auth |
+|---|---|---|---|---|
+| Annual physical / preventive | full coverage | no | — | no |
+| Primary care visit | $25 copay | no | — | no |
+| Specialist visit | $50 copay | no | — | no |
+| Urgent care | $50 copay | no | — | no |
+| Emergency room | $300 copay | no | — | no |
+| Lab / X-ray | 20% coinsurance | yes | — | no |
+| MRI / advanced imaging | 20% coinsurance | yes | — | **yes** |
+| Outpatient surgery | 20% coinsurance | yes | — | **yes** |
+| Inpatient hospital | 20% coinsurance | yes | — | **yes** |
+| Physical therapy | $40 copay | no | **20 visits/yr** | no |
+| Chiropractic | $25 copay | no | **$1,500/yr** | no |
+| Adult dental | excluded | — | — | — |
+
+This deliberately covers `full_coverage` / `copay` / `coinsurance` / visit-limit / dollar-limit
+/ prior-auth / excluded, and any unlisted `service_code` → `NO_COVERAGE`.
+
 ## Success criteria mapped to the rubric
 
 | Rubric signal | How this build satisfies it |
 |---|---|
 | Domain decomposition | Explicit entities (Member, Policy, CoverageRule, Claim, LineItem, Adjudication, Accumulator, Dispute) with clear relationships in `docs/domain-model.md`. |
-| Rule representation | Coverage rules are typed config data applied by a fixed-order adjudicator — not hardcoded branches, not a DSL. |
+| Rule representation | Coverage rules are typed config data — a discriminated cost-share union and unit-typed limits — applied by a fixed-order, mechanism-aware adjudicator; not hardcoded branches, not a DSL. Grounded in research across UnitedHealthcare, Aetna, Cigna, BCBS, and ACA structure. |
 | State management | Two explicit state machines (claim, line item) with validated transitions and derived claim status. |
 | Edge-case thinking | Partial approval, limit straddling, duplicate line items, dispute reopen, out-of-period policy, integer-cents money — each covered by a named test. |
 | Explanation capability | Every decision carries a stable reason code and a sentence citing the rule and numbers; exposed via `/explanation`. |
@@ -101,3 +147,7 @@ loaded by a seed script, not via the API.
 6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. If required and absent, the line is denied with `PRIOR_AUTH_REQUIRED`.
 7. **Disputes are member-initiated and immediately re-adjudicated** under current rules/accumulators; no human-reviewer queue. The original decision is preserved immutably.
 8. **Determinism over wall-clock.** Adjudication reads a snapshot of accumulators; concurrency control beyond SQLite's single-writer model is out of scope and noted.
+9. **One cost-share mechanism per service.** Each rule is `full_coverage`, `copay`, or `coinsurance` — not a stack. The real copay-then-coinsurance case (ER, some urgent care) is approximated by its dominant component and documented as a known simplification.
+10. **Limits are unit-typed (`dollars` or `visits`).** Visit/day caps are the most common real limit; the dollars case satisfies the brief's "$Y per year" example. Replacement-frequency and supply-window limits (DME, drug 30/90-day) are out of scope.
+11. **Prior auth is a clean denial.** Missing prior auth → `PRIOR_AUTH_REQUIRED`, payable 0. The real PPO "reduce-to-50%-of-allowed" penalty is a documented divergence, not built.
+12. **Network/metal-tier/family-deductible fields are omitted.** They change no math in a single-network, per-member, allowed==billed v1; each stored policy field must trace to a real adjudication effect.

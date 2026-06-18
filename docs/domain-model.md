@@ -18,11 +18,11 @@ explainable: every decision is reproducible from rules + facts + a snapshot of m
 |---|---|
 | Member | The insured person who submits claims. |
 | Policy | Binds a member to coverage rules for one plan year, with active dates, deductible, OOP max. |
-| CoverageRule | How one service type is covered (covered?, limit, deductible applicability, copay, coinsurance, prior-auth, exclusion). |
+| CoverageRule | How one service type is covered: covered/excluded, one cost-share mechanism (`full_coverage` \| `copay` \| `coinsurance`), deductible applicability, a unit-typed limit (`none` \| `dollars` \| `visits`), prior-auth. |
 | Claim | A submission grouping line items; has a lifecycle status and a fingerprint. |
 | LineItem | One service on a claim; has its own lifecycle status. |
 | Adjudication | The immutable decision for a line item (status, payable, member responsibility, reason code, explanation). Append-only. |
-| Accumulator | Persisted per-member-per-plan-year totals: deductible met, OOP met, per-service limit used. |
+| Accumulator | Persisted per-member-per-plan-year totals: deductible met, OOP met, per-service limit used (in the rule's unit — cents for `dollars`, a count for `visits`). |
 | Dispute | A member challenge that reopens a line item and preserves the prior decision. |
 
 ```
@@ -38,42 +38,55 @@ ER detail and field-level types: _fill in as the schema lands in `app/src`._
 
 ## Coverage rule shape
 
-Rules are typed config data, not code and not a DSL. Shape (subject to refinement):
+Rules are typed config data, not code and not a DSL. Shape grounded in research across
+UnitedHealthcare, Aetna, Cigna, BCBS, and ACA structure (`ai-artifacts/02-domain-research/`):
 
 ```ts
 type CoverageRule = {
   policyId: string;
-  serviceCode: string;        // e.g. "OFFICE_VISIT", "MRI", "PHYSIO"
+  serviceCode: string;        // closed catalog: "PREVENTIVE", "PCP_VISIT", "MRI", "PHYSICAL_THERAPY"…
   covered: boolean;
   excluded: boolean;          // explicit exclusion beats "covered"
-  annualLimitCents: number | null;   // null = no limit
-  appliesDeductible: boolean;
-  copayCents: number;         // 0 = none
-  coinsuranceRate: number;    // member share, 0.0–1.0 (0.2 = member pays 20%)
+  costShare:                  // discriminated union — exactly one mechanism per service
+    | { type: "full_coverage" }
+    | { type: "copay"; copayCents: number }
+    | { type: "coinsurance"; rate: number };   // member share, 0.0–1.0 (0.2 = member pays 20%)
+  appliesDeductible: boolean; // copay → usually false; coinsurance → usually true
+  limit:                      // discriminated union — the unit matters
+    | { unit: "none" }
+    | { unit: "dollars"; amountCents: number } // "$Y per year" (the brief's example)
+    | { unit: "visits"; count: number };       // "20 PT visits/year" (the #1 real limit)
   requiresPriorAuth: boolean;
 };
 ```
 
-Money is integer cents everywhere. `coinsuranceRate` is the *member's* share.
+Money is integer cents everywhere; `coinsurance.rate` is the *member's* share. Cost-share is a
+discriminated union (not nullable copay + coinsurance fields) because real benefits use exactly
+one mechanism — preventive is `full_coverage`, office/ER/urgent are `copay`, imaging/surgery/
+hospital are `coinsurance` after deductible. The limit's `unit` is the load-bearing addition: a
+dollars-only field cannot express visit/day caps, which are the most common real limit.
 
-## Adjudication order (the 11 steps)
+## Adjudication order (mechanism-aware)
 
-Per line item, short-circuiting on denial:
+Per line item, short-circuiting on denial. The cost-share step is a **switch on
+`costShare.type`**, not a fixed deductible→copay→coinsurance sequence.
 
 1. Policy active for the service date? else `POLICY_NOT_ACTIVE`.
 2. Rule exists for the service code? else `NO_COVERAGE`.
 3. Covered and not excluded? else `EXCLUDED` / `NO_COVERAGE`.
 4. Prior auth satisfied if required? else `PRIOR_AUTH_REQUIRED`.
-5. Annual limit remaining? else `LIMIT_EXCEEDED`.
+5. Limit remaining? `none` → skip; `visits` → if count used up, `LIMIT_EXCEEDED` (whole-visit, no straddle); `dollars` → if exhausted, `LIMIT_EXCEEDED` (partial straddle in 7b).
 6. Compute allowed (v1: allowed = billed).
-7. Apply deductible (member pays, accrues to deductible accumulator).
-8. Apply copay.
-9. Apply coinsurance (member share); cap plan pay at remaining annual limit (straddling).
-10. Apply OOP cap (once OOP max reached, plan pays 100%).
-11. Writeback: persist adjudication; increment deductible/OOP/limit accumulators atomically.
+7. Apply cost-share — switch on `costShare.type`:
+   - `full_coverage` → member 0, plan = allowed.
+   - `copay` → member = min(copay, allowed); copay accrues to OOP, not the deductible.
+   - `coinsurance` → if `appliesDeductible`, draw remaining deductible (member, accrues); then member += round(rate × remainder); plan = allowed − member.
+   - (7b) dollar-limit straddle → cap plan pay at remaining limit; shortfall → member, `LIMIT_EXCEEDED`.
+8. Apply OOP cap (once OOP max reached, plan pays 100%, `OOP_MAX_REACHED`).
+9. Writeback: persist adjudication; increment deductible/OOP atomically and `limit_used` in the rule's unit (dollars: += plan pay; visits: += 1).
 
 Worked numeric examples: _add 2–3 once the adjudicator is implemented (deductible
-crossing, coinsurance odd-cents, OOP cap)._
+crossing, coinsurance odd-cents, dollar-limit straddle, visit-limit exhaustion, OOP cap)._
 
 ## State machines
 
@@ -116,8 +129,15 @@ POLICY_NOT_ACTIVE, DISPUTED_OVERRIDE`. One dominant code classifies each decisio
 explanation text carries the full breakdown. Mapping table (code → template sentence):
 _fill in alongside the explanation builder._
 
-## Open modeling questions
+## Resolved modeling questions (this framing session)
 
-- Q1 prior-auth: boolean precondition vs. pending/approved sub-state. Current: TBD (see TRACK.md).
-- Q2 out-of-network: not-covered vs. parallel rule set. Current: TBD.
-- Q3 accumulator period: fixed plan-year vs. rolling 12-month. Current: TBD.
+- **Cost-share representation** → discriminated union (`full_coverage` \| `copay` \| `coinsurance`), one mechanism per service. Research showed real benefits use exactly one. (TRACK #5)
+- **Limit representation** → unit-typed (`none` \| `dollars` \| `visits`). Visit/day caps are the most common real limit and a dollars-only field can't express them. (TRACK #6)
+- **Q1 prior-auth** → boolean precondition; missing → `PRIOR_AUTH_REQUIRED`, payable 0. The PPO reduce-to-50% penalty is a documented divergence, not built.
+- **Q2 out-of-network** → in-network only for v1 (allowed == billed); unlisted/OON service → `NO_COVERAGE`. Network/metal-tier/family fields omitted (change no math).
+- **Q3 accumulator period** → fixed plan-year window keyed on the policy; resets at plan-year boundary. No rolling 12-month.
+
+## Still open
+
+- Worked numeric examples (above) — fill once the adjudicator lands.
+- Transition tables for both state machines — fill as the machines are implemented.

@@ -56,15 +56,41 @@ where coinsurance produces fractional cents (member + plan shares must sum to al
 non-rubric surface. _Confirm this stands after framing._
 **Reversible?:** Yes — the domain core is interface-agnostic.
 
+### 6 — Cost-share: a discriminated union, not nullable copay + coinsurance fields
+
+**Chose:** `costShare: { type: "full_coverage" } | { type: "copay"; copayCents } | { type: "coinsurance"; rate }` — one mechanism per rule.
+**Over:** a flat record with both `copayCents` and `coinsuranceRate` applied in sequence.
+**Trade-off:** Research across UHC, Aetna, Cigna, BCBS, and ACA showed real benefits use
+*one* mechanism — preventive is full coverage, office/ER/urgent are copay, imaging/surgery/
+hospital are coinsurance after deductible. A union makes the model *say* that, turns the
+adjudicator into an exhaustive switch, and rejects incoherent rules at the type level. Cost:
+the rare copay-then-coinsurance case (ER) is approximated by its dominant component.
+**Reversible?:** Yes — a 4th union variant can be added; the adjudicator switch is the seam.
+
+### 7 — Annual limit: unit-typed (`none` | `dollars` | `visits`), not dollars-only
+
+**Chose:** `limit: { unit: "none" } | { unit: "dollars"; amountCents } | { unit: "visits"; count }`,
+with the accumulator's `limit_used` tracked in the same unit.
+**Over:** a single `annualLimitCents` field.
+**Trade-off:** The brief's one concrete example ("$Y per year") is a dollar limit — but the
+*most common* real limit is a visit/day cap (PT 20 visits/yr, SNF 60 days/yr), which a
+cents-only field literally cannot express. The unit discriminator handles both on one code
+path. Cost: the accumulator and limit check become unit-aware (small). This is a deliberate
+step beyond the brief's literal ask, justified by domain research.
+**Reversible?:** Moderate — touches the accumulator's limit column and the limit step.
+
 ---
+
+## Decisions resolved this framing session
+
+- **Prior-auth modeling** (Q1) — boolean precondition; missing → `PRIOR_AUTH_REQUIRED`, payable 0. PPO reduce-to-50% penalty documented as a divergence, not built.
+- **Out-of-network** (Q2) — in-network only for v1 (allowed == billed); OON/unlisted service → `NO_COVERAGE`. Network/metal/family fields omitted.
+- **Accumulator period** (Q3) — fixed plan-year window keyed on the policy.
 
 ## Decisions still open (resolve and move up)
 
-- **Prior-auth modeling** (Q1) — boolean precondition vs. pending/approved sub-state.
-- **Out-of-network** (Q2) — not-covered vs. parallel rule set.
-- **Accumulator period** (Q3) — fixed plan-year vs. rolling 12-month.
 - **Dispute resolution** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable original).
-- **Duplicate policy** — hard reject vs. soft duplicate flag (leaning soft flag, `DUPLICATE_LINE_ITEM`).
+- **Duplicate handling** — hard reject vs. soft duplicate flag (leaning soft flag, `DUPLICATE_LINE_ITEM`).
 
 ## Assumptions about the domain
 
@@ -74,5 +100,7 @@ non-rubric surface. _Confirm this stands after framing._
 4. Plan year is a fixed window on the policy; accumulators align to it.
 5. Prior auth is a recorded precondition, not a workflow.
 6. Determinism over wall-clock; concurrency beyond SQLite's single-writer is out of scope.
+7. One cost-share mechanism per service; copay-then-coinsurance approximated by dominant component.
+8. Limits are unit-typed (`dollars` or `visits`); supply-window/replacement-frequency limits out of scope.
 
 _Add to this list whenever the build forces a judgment call the assignment left open._
