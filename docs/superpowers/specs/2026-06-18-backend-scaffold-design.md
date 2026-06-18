@@ -51,8 +51,8 @@ app/
 │   │   └── env.ts               # PORT, DB path, plan-year defaults
 │   │
 │   ├── domain/                  # ── PURE CORE: no express, no sqlite ──
-│   │   ├── entities/            # Member, Policy, CoverageRule, Claim,
-│   │   │                        #   LineItem, Adjudication, Accumulator, Dispute (TS types)
+│   │   ├── entities/            # Member, Policy, Claim, LineItem, Adjudication,
+│   │   │                        #   Accumulator, Dispute (TS types). CoverageRule lives in rules/.
 │   │   ├── reason-codes.ts      # ReasonCode enum
 │   │   ├── money/
 │   │   │   └── cents.ts         # integer-cents math + deterministic rounding
@@ -68,10 +68,10 @@ app/
 │   │       ├── claim-state.ts   # SUBMITTED→UNDER_REVIEW→…→PAID + guards
 │   │       └── line-item-state.ts
 │   │
-│   ├── controllers/             # HTTP handlers: parse → call service → shape response
-│   ├── services/                # orchestration: submitClaim, openDispute, getExplanation
-│   ├── repositories/            # SQLite persistence (claims, adjudications, accumulators)
-│   ├── routes/                  # express routers: claims, disputes, policies (read)
+│   ├── controllers/             # claim.controller (submit/get/explanation) + dispute.controller
+│   ├── services/                # claim.service (submit→adjudicate) + dispute.service (re-adjudicate)
+│   ├── repositories/            # SQLite persistence: claim, adjudication, accumulator, coverage-rule
+│   ├── routes/                  # claims.routes — the 4 PRD endpoints, all under /claims
 │   ├── middlewares/
 │   │   ├── schema-validation.ts # request validation (zod)
 │   │   └── error-handler.ts

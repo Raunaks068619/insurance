@@ -5,9 +5,10 @@ honest and current — the next agent trusts it instead of re-deriving everythin
 
 ## Current focus
 
-Phase 01 framing — coverage/policy model **locked** (cost-share union + unit-typed limits,
-grounded in real-insurer research). Next: resolve dispute + duplicate handling, then close
-framing and move to design.
+Phase 01 framing — coverage/policy model **locked**; payment direction (reimbursement,
+plan → member) and the **Member actor** confirmed. Walking the Actors · Actions · Artifacts
+map: Policy ✅ · CoverageRule ✅ · Member ✅ → **Claim next**. Then resolve Q4/Q5 and close
+framing.
 
 ## Current phase
 
@@ -36,6 +37,8 @@ Nothing blocked.
 | 5 | 2026-06-18 | Cost-share as a discriminated union (`full_coverage`\|`copay`\|`coinsurance`) | Real benefits (UHC/Aetna/Cigna/BCBS/ACA) use exactly one mechanism per service; union makes the model say it and the adjudicator an exhaustive switch. | No |
 | 6 | 2026-06-18 | Unit-typed limits (`none`\|`dollars`\|`visits`) | The most common real limit is a visit/day cap, which a dollars-only field can't express; dollars still satisfies the brief's "$Y/yr". | No |
 | 7 | 2026-06-18 | Prior-auth = clean denial; OON/network/metal/family omitted | Each stored field must trace to a real adjudication effect in a single-network, per-member, allowed==billed v1. | No |
+| 8 | 2026-06-18 | Reimbursement model (plan → member); PAID via explicit settle action, gateway success assumed | Brief says "claims for reimbursement" and lists `paid` in the lifecycle. No real payment processing in scope → record the transition. Likely a 5th interface action. | No |
+| 9 | 2026-06-18 | Member = opaque `member_id` anchor; PII minimized/separated, encryption-at-rest candidate | Brief flags sensitive health data; engine adjudicates on `member_id → policy + accumulators` and never needs the name. One human persona (no auth/roles). | No |
 
 ## Domain research findings (2026-06-18)
 
