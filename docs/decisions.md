@@ -79,6 +79,53 @@ path. Cost: the accumulator and limit check become unit-aware (small). This is a
 step beyond the brief's literal ask, justified by domain research.
 **Reversible?:** Moderate — touches the accumulator's limit column and the limit step.
 
+### 8 — `NEEDS_REVIEW` line state exists; prior-auth routing is PROVISIONAL (C3)
+
+> **Status: PROVISIONAL — adjudication (C3) is not yet locked.** Only the *state* is locked
+> here; the *routing rule* is confirmed when we brainstorm C3, not before.
+
+**Locked (artifact-level):** `NEEDS_REVIEW` is a valid line-item state; the claim aggregates
+to `UNDER_REVIEW` while any line is in review (infographic 04).
+**Provisional (C3 behavior, to confirm):** that a prior-auth-missing line *routes to*
+`NEEDS_REVIEW` rather than a clean `DENIED`. The brief's *"1 needs review"* and infographic 04
+point this way, but it is an adjudication decision — it stays provisional until the C3
+brainstorm, and it would revise #7 if confirmed.
+**Open (Q6):** with no human-reviewer queue, how a `NEEDS_REVIEW` line resolves in v1.
+
+### 9 — Capture `diagnosis_code` + `provider` as encrypted, non-adjudicated PHI
+
+**Chose:** Capture `diagnosis_code` and `provider` on the Claim, store them as sensitive
+(encryption-at-rest candidate), and **never** read them in adjudication.
+**Over:** Omitting them entirely (the earlier research lean).
+**Trade-off:** The brief explicitly names them as sensitive health data; capturing them is
+where we *demonstrate* the PHI-handling the brief is testing. Cost: PHI we must protect for
+zero math benefit — accepted deliberately, documented as the showcase of the PHI stance.
+**Reversible?:** Yes — they're inert fields.
+
+### 10 — Claim + LineItem shape, closed 12-code catalog, `reasons[]` array
+
+**Chose:** Claim = `{ id, member_id, service_date (claim-level), provider, diagnosis_code,
+status (derived) }`; LineItem = `{ id, claim_id, service_code, billed_cents, units,
+prior_auth_present, status, fingerprint }`; a **closed 12-entry `service_code` catalog**;
+Adjudication carries a `reasons[]` array.
+**Over:** Per-line service dates; an open service vocabulary; a single dominant reason code.
+**Trade-off:** Claim-level date + closed catalog keep v1 simple and make `NO_COVERAGE`
+well-defined. `reasons[]` gives a richer EOB breakdown than one dominant code. Cost: can't
+model a claim spanning multiple service dates (documented).
+**Reversible?:** Moderate for the date; easy for the rest.
+
+### 11 — C2 intake: reject = HTTP 4xx, never persisted (no `REJECTED` state)
+
+**Chose:** Structural/identity failures (bad shape, non-integer cents, future/invalid date,
+**unknown member**) → HTTP `4xx` with `{ errors: [{ field, code, message }] }`, nothing
+persisted. Member *existence* is an intake reject; policy *active-on-date* is an
+adjudication `POLICY_NOT_ACTIVE` deny.
+**Over:** Persisting a `REJECTED` claim row for auditability.
+**Trade-off:** Matches the industry reject≠deny boundary (a reject never enters the system,
+no appeal) and avoids bloating the frozen claim state machine. Cost: no built-in audit trail
+of bad submissions — if needed, log them separately, not as Claim rows.
+**Reversible?:** Yes — a reject log can be added without touching the claim machine.
+
 ---
 
 ## Decisions resolved this framing session
@@ -89,8 +136,17 @@ step beyond the brief's literal ask, justified by domain research.
 
 ## Decisions still open (resolve and move up)
 
-- **Dispute resolution** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable original).
-- **Duplicate handling** — hard reject vs. soft duplicate flag (leaning soft flag, `DUPLICATE_LINE_ITEM`).
+- **C3 Adjudication engine — STILL REMAINING (the big one).** The entire adjudication
+  *behavior* is not yet brainstormed/locked: step order, prior-auth routing (`NEEDS_REVIEW`
+  vs deny), `reasons[]` population, cost-share math, limit straddle, OOP cap, atomic
+  accumulator writeback, and the line→claim aggregation detail. Only the artifact *shapes*
+  it reads/writes are locked.
+- **Dispute resolution (Q4)** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable original). C6.
+- **NEEDS_REVIEW resolution (Q6)** — how a review-pending line clears in a v1 with no human queue.
+
+## Decisions resolved (moved up)
+
+- **Duplicate handling (Q5)** — RESOLVED: fingerprint computed at intake; soft `DUPLICATE_LINE_ITEM` decided at adjudication. See decision #11 / TRACK #12.
 
 ## Assumptions about the domain
 

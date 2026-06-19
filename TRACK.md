@@ -5,10 +5,12 @@ honest and current — the next agent trusts it instead of re-deriving everythin
 
 ## Current focus
 
-Phase 01 framing — coverage/policy model **locked**; payment direction (reimbursement,
-plan → member) and the **Member actor** confirmed. Walking the Actors · Actions · Artifacts
-map: Policy ✅ · CoverageRule ✅ · Member ✅ → **Claim next**. Then resolve Q4/Q5 and close
-framing.
+Phase 01 framing — **all artifacts + actors locked** (Policy, CoverageRule, 12-service
+catalog, Member, Claim, LineItem, Adjudication, Accumulator, Dispute; actors: Member,
+System/Adjudicator, Insurer). **C2 claim-intake slice (N1–N5) defined.** Next: `/to-prd`
+the intake slice and plan the build. Deferred: Q4 dispute-resolution policy, Q6 NEEDS_REVIEW
+resolution path. Regenerate the 3 stale infographics (CoverageRule, money-flow, pipeline) to
+match the cost-share-union + unit-typed-limit model.
 
 ## Current phase
 
@@ -19,8 +21,9 @@ framing.
 - [x] **Q1 — Prior auth modeling.** RESOLVED → boolean precondition; missing → `PRIOR_AUTH_REQUIRED`, payable 0. PPO reduce-to-50% penalty documented as a divergence, not built.
 - [x] **Q2 — Out-of-network policy.** RESOLVED → in-network only for v1 (allowed == billed); OON/unlisted service → `NO_COVERAGE`. Network/metal-tier/family fields omitted (no math impact).
 - [x] **Q3 — Accumulator period boundaries.** RESOLVED → fixed plan-year window keyed on the policy.
-- [ ] **Q4 — Dispute resolution.** Auto re-adjudicate vs. reviewer queue. Leaning auto, original preserved immutably.
-- [ ] **Q5 — Duplicate handling.** Hard reject vs. soft duplicate flag. Leaning soft flag, `DUPLICATE_LINE_ITEM`.
+- [x] **Q5 — Duplicate handling.** RESOLVED → fingerprint (`member_id + service_code + service_date + billed_cents`) computed at **intake**; the duplicate *decision* is made at **adjudication** as a soft `DUPLICATE_LINE_ITEM` (payable 0). Not an intake reject.
+- [ ] **Q4 — Dispute resolution.** Auto re-adjudicate vs. reviewer queue. Leaning auto, original preserved immutably. (C6, deferred.)
+- [ ] **Q6 — NEEDS_REVIEW resolution path.** With no human reviewer in scope, how does a `NEEDS_REVIEW` line (prior-auth missing) resolve? Leaning: member re-submits with `prior_auth_present=true`; manual review out of scope. (C3/C6, deferred.)
 
 ## Blocked
 
@@ -39,6 +42,11 @@ Nothing blocked.
 | 7 | 2026-06-18 | Prior-auth = clean denial; OON/network/metal/family omitted | Each stored field must trace to a real adjudication effect in a single-network, per-member, allowed==billed v1. | No |
 | 8 | 2026-06-18 | Reimbursement model (plan → member); PAID via explicit settle action, gateway success assumed | Brief says "claims for reimbursement" and lists `paid` in the lifecycle. No real payment processing in scope → record the transition. Likely a 5th interface action. | No |
 | 9 | 2026-06-18 | Member = opaque `member_id` anchor; PII minimized/separated, encryption-at-rest candidate | Brief flags sensitive health data; engine adjudicates on `member_id → policy + accumulators` and never needs the name. One human persona (no auth/roles). | No |
+| 10 | 2026-06-18 | `NEEDS_REVIEW` is a valid line state (locked); prior-auth *routing* to it is **PROVISIONAL** | State comes from infographic 04 + brief's "1 needs review". The *routing rule* is C3 adjudication behavior — confirmed in the C3 brainstorm, would revise #7. | Provisional |
+| 11 | 2026-06-18 | Capture `diagnosis_code` + `provider` on the Claim as encrypted, non-adjudicated PHI | Brief names them as sensitive data; capturing is where we *demonstrate* the PHI stance. Revises the earlier omit-lean (Fork #2). | No |
+| 12 | 2026-06-18 | Claim + LineItem attributes locked; 12-code closed service catalog; `service_date` at claim level; `units` per line; Adjudication `reasons[]` array | Matches the infographics. Unlisted `service_code` → `NO_COVERAGE`. `reasons[]` array revises the single-dominant-code stance. | No |
+| 13 | 2026-06-18 | C2 intake = N1–N5; reject = HTTP 4xx, never persisted (no `REJECTED` state); member-existence = intake reject, policy-active = adjudication deny | Industry reject≠deny boundary (Stedi: once adjudicated, can only be denied). A reject never enters the system. | No |
+| 14 | 2026-06-18 | Accumulator carries `deductible_met_cents` + `oop_met_cents` + per-service `limit_used` | Infographic 02 omitted `deductible_met`; the deductible draw at adjudication needs it. | No |
 
 ## Domain research findings (2026-06-18)
 
@@ -62,6 +70,7 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
 |------|-------|-------|---------|------|
 | 2026-06-18 | Claude Code (Opus) | 01-framing | Scaffold created and committed; framing conversation in progress. | Resolve Q1–Q3, log framing decisions, move to 02 domain research. |
 | 2026-06-18 | Claude Code (Opus) | 01-framing → 02-domain-research | Ran real-insurer coverage research; locked cost-share union + unit-typed limits + 12-rule seed set; resolved Q1–Q3; propagated to PRD, insurance-domain skill, docs/, and artifacts. | Resolve Q4 (dispute) + Q5 (duplicate), then close framing → design. |
+| 2026-06-18 | Claude Code (Opus) | 01-framing → 02-domain-research | Researched claim intake (UHC/Cigna/Aetna + CMS-1500/837); **locked all artifacts + actors**; defined the C2 intake slice (N1–N5); adopted `NEEDS_REVIEW` + `dx_code`/`provider` PHI capture per the infographics; closed Q5. | `/to-prd` the intake slice; regenerate the 3 stale infographics; resolve Q4/Q6 when adjudication (C3) starts. |
 
 ## Notes for next agent
 

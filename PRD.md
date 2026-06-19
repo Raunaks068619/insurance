@@ -125,6 +125,61 @@ type CoverageRule = {
 This deliberately covers `full_coverage` / `copay` / `coinsurance` / visit-limit / dollar-limit
 / prior-auth / excluded, and any unlisted `service_code` → `NO_COVERAGE`.
 
+## Claim, line item & intake (C2) — locked shapes
+
+> Adjudication *behavior* (C3) — step order, cost-share math, prior-auth routing, `reasons[]`
+> population — is being finalized separately and is **not** locked in this section.
+
+### Claim (the submission envelope)
+
+```ts
+type Claim = {
+  id: string;
+  member_id: string;            // resolves to Member → Policy
+  service_date: string;         // CLAIM-level (ISO); drives policy-active at C3
+  provider?: string;            // captured PHI — encrypted at rest, NOT adjudicated
+  diagnosis_code?: string;      // captured PHI — encrypted at rest, NOT adjudicated
+  status: ClaimStatus;          // DERIVED by aggregating line items, never set directly
+  line_items: LineItem[];       // ≥1
+};
+```
+
+### LineItem (the unit of adjudication)
+
+```ts
+type LineItem = {
+  id: string;
+  claim_id: string;
+  service_code: string;         // closed catalog; unlisted → NO_COVERAGE (at C3)
+  billed_cents: number;         // positive integer
+  units: number;                // default 1
+  prior_auth_present: boolean;  // default false
+  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
+  fingerprint: string;          // member_id + service_code + service_date + billed_cents
+};
+```
+(`NEEDS_REVIEW` is a valid state; the *rule* that routes prior-auth-missing to it is C3 behavior, provisional.)
+
+### Service-code catalog (closed, 12)
+
+`PREVENTIVE` · `PCP_VISIT` · `SPECIALIST_VISIT` · `URGENT_CARE` · `EMERGENCY_ROOM` · `LAB` ·
+`MRI` · `OUTPATIENT_SURGERY` · `INPATIENT_HOSPITAL` · `PHYSICAL_THERAPY` · `CHIROPRACTIC` ·
+`ADULT_DENTAL`. An unlisted `service_code` is *accepted* at intake and *denied* `NO_COVERAGE`
+at adjudication — never an intake reject.
+
+### Intake pipeline (C2) — N1–N5
+
+1. Receive `POST /claims`.
+2. **Structural validation**: required fields, ≥1 line, `billed_cents` a positive integer, `service_date` a real non-future date.
+3. **Member resolution**: `member_id` must resolve to a known Member, else reject.
+4. **Compute** the per-line fingerprint.
+5. **Persist** Claim + LineItems (claim `SUBMITTED`, lines `PENDING`).
+
+**Reject model:** a structural/identity failure → HTTP `4xx` with `{ errors: [{ field, code,
+message }] }` and **nothing persisted** (there is no `REJECTED` state — a reject never enters
+the system). Member *existence* is an intake reject; policy *active-on-date* is an
+adjudication deny (`POLICY_NOT_ACTIVE`).
+
 ## Success criteria mapped to the rubric
 
 | Rubric signal | How this build satisfies it |
@@ -151,3 +206,7 @@ This deliberately covers `full_coverage` / `copay` / `coinsurance` / visit-limit
 10. **Limits are unit-typed (`dollars` or `visits`).** Visit/day caps are the most common real limit; the dollars case satisfies the brief's "$Y per year" example. Replacement-frequency and supply-window limits (DME, drug 30/90-day) are out of scope.
 11. **Prior auth is a clean denial.** Missing prior auth → `PRIOR_AUTH_REQUIRED`, payable 0. The real PPO "reduce-to-50%-of-allowed" penalty is a documented divergence, not built.
 12. **Network/metal-tier/family-deductible fields are omitted.** They change no math in a single-network, per-member, allowed==billed v1; each stored policy field must trace to a real adjudication effect.
+13. **`service_date` is claim-level.** One date per claim; a claim spanning multiple service dates is out of scope (documented).
+14. **`diagnosis_code` + `provider` are captured as encrypted, non-adjudicated PHI.** They demonstrate the sensitive-data handling the brief asks for; no rule reads them.
+15. **`units` per line defaults to 1.** Multi-unit lines are supported but seed data uses 1.
+16. **Intake reject = HTTP `4xx`, never persisted** (no `REJECTED` state). Member *existence* is an intake reject; policy *active-on-date* is an adjudication deny.

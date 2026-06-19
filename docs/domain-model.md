@@ -34,7 +34,47 @@ Member 1───1 Policy 1───N CoverageRule
    └───N Accumulator (1 per plan year, + per-service limit rows)
 ```
 
-ER detail and field-level types: _fill in as the schema lands in `app/src`._
+### Claim & LineItem field detail (locked; adjudication behavior is separate)
+
+```ts
+type Claim = {
+  id: string;
+  memberId: string;             // resolves to Member → Policy
+  serviceDate: string;          // CLAIM-level ISO date
+  provider?: string;            // captured PHI — encrypted at rest, NOT adjudicated
+  diagnosisCode?: string;       // captured PHI — encrypted at rest, NOT adjudicated
+  status: ClaimStatus;          // DERIVED from line items
+  lineItems: LineItem[];        // >= 1
+};
+
+type LineItem = {
+  id: string;
+  claimId: string;
+  serviceCode: string;          // closed 12-entry catalog; unlisted → NO_COVERAGE
+  billedCents: number;          // positive integer (allowed == billed in v1)
+  units: number;                // default 1
+  priorAuthPresent: boolean;    // default false
+  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
+  fingerprint: string;          // memberId + serviceCode + serviceDate + billedCents
+};
+```
+
+**Service-code catalog (closed, 12):** `PREVENTIVE`, `PCP_VISIT`, `SPECIALIST_VISIT`,
+`URGENT_CARE`, `EMERGENCY_ROOM`, `LAB`, `MRI`, `OUTPATIENT_SURGERY`, `INPATIENT_HOSPITAL`,
+`PHYSICAL_THERAPY`, `CHIROPRACTIC`, `ADULT_DENTAL`. Each maps to one CoverageRule on the
+policy; an unlisted code is accepted at intake and denied `NO_COVERAGE` at adjudication.
+
+**PHI:** `Member.name`/`dob`, `Claim.provider`/`diagnosisCode` are sensitive — minimized,
+separated from adjudication data, encryption-at-rest candidates. The engine never reads them.
+
+### Intake (C2, N1–N5)
+
+Receive → structural validation (fields, ≥1 line, positive-integer `billedCents`, real
+non-future `serviceDate`) → member resolution (exists, else reject) → compute fingerprint →
+persist (`Claim = SUBMITTED`, lines `PENDING`). A structural/identity failure is an HTTP
+`4xx` reject with `{ errors: [{ field, code, message }] }` and **nothing persisted** — there
+is no `REJECTED` state. Member *existence* rejects at intake; policy *active-on-date* denies
+at adjudication.
 
 ## Coverage rule shape
 
@@ -108,8 +148,14 @@ SUBMITTED → ADJUDICATING → { APPROVED | PARTIALLY_APPROVED | DENIED }
                               DISPUTED → re-adjudicate → { APPROVED | PARTIALLY_APPROVED | DENIED } → PAID
 ```
 
-Transition table (allowed/rejected transitions) with guards: _fill in as the machine is
-implemented; illegal transitions must be rejected, not silently ignored._
+**Locked state set (infographic 04):** `PENDING → { APPROVED | DENIED | NEEDS_REVIEW } → PAID`;
+a dispute reopens `DENIED → NEEDS_REVIEW`. `PARTIALLY_APPROVED` is **claim-level only**, never
+a line state. (These supersede the `SUBMITTED`/`ADJUDICATING`/line-level-`PARTIALLY_APPROVED`
+names sketched above.)
+
+Transition table + guards, and the **prior-auth → `NEEDS_REVIEW` routing** (provisional), are
+finalized with C3/C4 adjudication & lifecycle work — not locked here. Illegal transitions
+must be rejected, not silently ignored.
 
 ### Aggregation (line items → claim status)
 

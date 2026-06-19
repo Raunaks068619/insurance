@@ -13,18 +13,23 @@ of them is a bug — reconcile and log the decision in `TRACK.md`.
 
 | Entity | Responsibility | Key fields |
 |---|---|---|
-| **Member** | The insured person. | `id`, `name` (sensitive), `policy_id` |
+| **Member** | The insured person (data subject). | `id`, `name` + `dob` (sensitive PHI, encrypted), `policy_id` |
 | **Policy** | Binds a member to coverage for a plan year. | `id`, `member_id`, `plan_year`, `effective_date`, `termination_date`, `deductible_cents`, `oop_max_cents` |
 | **CoverageRule** | How one service type is covered. | `policy_id`, `service_code`, `covered`, `excluded`, `cost_share` (discriminated: `full_coverage` \| `copay{copay_cents}` \| `coinsurance{rate}`), `applies_deductible`, `limit` (discriminated: `none` \| `dollars{amount_cents}` \| `visits{count}`), `requires_prior_auth` |
-| **Claim** | A submission grouping line items. | `id`, `member_id`, `submitted_at`, `status`, `fingerprint` |
-| **LineItem** | One service on a claim. | `id`, `claim_id`, `service_code`, `billed_cents`, `service_date`, `prior_auth_present`, `status` |
-| **Adjudication** | The immutable decision for a line item. | `line_item_id`, `status`, `payable_cents`, `member_responsibility_cents`, `reason_code`, `explanation`, `created_at` |
+| **Claim** | A submission grouping line items. | `id`, `member_id`, `service_date` (claim-level), `provider` + `diagnosis_code` (sensitive PHI, encrypted, **not** adjudicated), `status` (derived) |
+| **LineItem** | One service on a claim; the unit of adjudication. | `id`, `claim_id`, `service_code`, `billed_cents`, `units`, `prior_auth_present`, `status`, `fingerprint` |
+| **Adjudication** | The immutable decision for a line item. | `line_item_id`, `status`, `payable_cents`, `member_responsibility_cents`, `reasons` (ReasonCode[]), `explanation`, `created_at` |
 | **Accumulator** | Persisted running totals per member per plan year. | `member_id`, `plan_year`, `deductible_met_cents`, `oop_met_cents`, `limit_used` per `service_code` (interpreted in the rule's limit unit — cents for `dollars`, a visit count for `visits`) |
 | **Dispute** | A member challenge to a line-item decision. | `id`, `line_item_id`, `original_adjudication_id`, `reason`, `opened_at`, `resolved_at`, `outcome` |
 
 Relationships: Member 1—1 Policy (per plan year); Policy 1—N CoverageRule; Member 1—N
 Claim; Claim 1—N LineItem; LineItem 1—N Adjudication (history; latest is current);
 LineItem 1—N Dispute; Member 1—N Accumulator (one per plan year, with per-service limit rows).
+
+**Closed service-code catalog (12):** `PREVENTIVE`, `PCP_VISIT`, `SPECIALIST_VISIT`,
+`URGENT_CARE`, `EMERGENCY_ROOM`, `LAB`, `MRI`, `OUTPATIENT_SURGERY`, `INPATIENT_HOSPITAL`,
+`PHYSICAL_THERAPY`, `CHIROPRACTIC`, `ADULT_DENTAL`. An unlisted `service_code` is accepted at
+intake and denied `NO_COVERAGE` at adjudication (never an intake reject).
 
 ## Terminology (precise)
 
@@ -66,6 +71,10 @@ carries the breakdown.
 
 ## Canonical adjudication order (mechanism-aware)
 
+> ⚠️ **C3 adjudication behavior is being finalized — treat this section as PROVISIONAL.**
+> In particular, prior-auth-missing may route to `NEEDS_REVIEW` (not a clean denial — see
+> below), and `reasons` is an array. The artifact *shapes* are locked; the *flow* is not.
+
 Apply per line item, in this exact order. Short-circuit denials return immediately. The
 cost-share step is a **switch on `cost_share.type`**, not a fixed deductible→copay→coinsurance
 sequence — a service is covered by exactly one mechanism.
@@ -73,7 +82,7 @@ sequence — a service is covered by exactly one mechanism.
 1. **Policy active?** Service date within `[effective_date, termination_date]`. Else → `POLICY_NOT_ACTIVE`, payable 0.
 2. **Rule exists?** A CoverageRule for `service_code` exists. Else → `NO_COVERAGE`, payable 0.
 3. **Covered & not excluded?** `excluded == true` → `EXCLUDED`; `covered == false` → `NO_COVERAGE`. Payable 0.
-4. **Prior auth satisfied?** If `requires_prior_auth` and not `prior_auth_present` → `PRIOR_AUTH_REQUIRED`, payable 0.
+4. **Prior auth satisfied?** If `requires_prior_auth` and not `prior_auth_present` → `PRIOR_AUTH_REQUIRED`. *(Provisional: the line likely goes to `NEEDS_REVIEW` rather than a clean `DENIED`/payable 0 — confirmed in the C3 brainstorm.)*
 5. **Limit remaining?** Read `limit_used` for the service_code:
    - `unit: none` → skip.
    - `unit: visits` → if `used_count >= count` → `LIMIT_EXCEEDED`, payable 0 (whole-visit unit; no straddle).
@@ -128,6 +137,11 @@ same starting accumulators yields identical results.
                                    DISPUTED → re-adjudicate → { APPROVED | PARTIALLY_APPROVED | DENIED }
    APPROVED / PARTIALLY_APPROVED → PAID
 ```
+
+**Locked state set (infographic 04):** `PENDING → { APPROVED | DENIED | NEEDS_REVIEW } → PAID`;
+a dispute reopens `DENIED → NEEDS_REVIEW`. `PARTIALLY_APPROVED` is **claim-level only**. The
+names in the diagram above (`SUBMITTED`/`ADJUDICATING`/line-level `PARTIALLY_APPROVED`) are
+superseded by these; the routing into `NEEDS_REVIEW` is provisional C3 work.
 
 ### Aggregation logic (line items → claim)
 
