@@ -1,0 +1,3 @@
+- [Project: claims-adjudication take-home](project_claims-takehome.md) — 24-48h FDE take-home; locked stack & constraints for the data layer
+- [User: collaboration style](user_collaboration-style.md) — wants short, skimmable, example-driven output; no over-engineering; align before building
+- [Accumulator design decision](project_accumulator-design.md) — single-table dimension-discriminator pattern chosen for dollar+visit limits

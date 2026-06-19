@@ -128,7 +128,9 @@ This deliberately covers `full_coverage` / `copay` / `coinsurance` / visit-limit
 ## Claim, line item & intake (C2) — locked shapes
 
 > Adjudication *behavior* (C3) — step order, cost-share math, prior-auth routing, `reasons[]`
-> population — is being finalized separately and is **not** locked in this section.
+> population, determinism, accumulator writeback, and the TDD build order — is now planned in
+> [`docs/adjudication-plan.md`](docs/adjudication-plan.md). This section locks the *shapes* C3
+> reads/writes.
 
 ### Claim (the submission envelope)
 
@@ -153,12 +155,12 @@ type LineItem = {
   service_code: string;         // closed catalog; unlisted → NO_COVERAGE (at C3)
   billed_cents: number;         // positive integer
   units: number;                // default 1
-  prior_auth_present: boolean;  // default false
+  prior_auth_present: boolean;  // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
   status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
   fingerprint: string;          // member_id + service_code + service_date + billed_cents
 };
 ```
-(`NEEDS_REVIEW` is a valid state; the *rule* that routes prior-auth-missing to it is C3 behavior, provisional.)
+(`NEEDS_REVIEW` is a valid state, reached **only** via a dispute reopen — prior-auth-missing is a clean `DENIED` (decision #8), not `NEEDS_REVIEW`.)
 
 ### Service-code catalog (closed, 12)
 
@@ -199,7 +201,7 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 3. **In-network only for v1.** Out-of-network is modeled as either not-covered or a separate rule set if time permits; default assumption documented in `TRACK.md`.
 4. **Allowed amount == billed amount.** No fee schedule / provider-negotiated rate lookup; the billed amount is treated as the allowed amount. A real system would apply a fee schedule first.
 5. **Plan year is a fixed calendar window on the policy.** Accumulator periods align to the policy's plan-year boundaries, not a rolling window.
-6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. If required and absent, the line is denied with `PRIOR_AUTH_REQUIRED`.
+6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. `prior_auth_present` defaults to `true` (absence = auth present); if a rule requires it and the line is explicitly `false`, the line is a clean `DENIED` with `PRIOR_AUTH_REQUIRED`, payable 0.
 7. **Disputes are member-initiated and immediately re-adjudicated** under current rules/accumulators; no human-reviewer queue. The original decision is preserved immutably.
 8. **Determinism over wall-clock.** Adjudication reads a snapshot of accumulators; concurrency control beyond SQLite's single-writer model is out of scope and noted.
 9. **One cost-share mechanism per service.** Each rule is `full_coverage`, `copay`, or `coinsurance` — not a stack. The real copay-then-coinsurance case (ER, some urgent care) is approximated by its dominant component and documented as a known simplification.
@@ -210,3 +212,4 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 14. **`diagnosis_code` + `provider` are captured as encrypted, non-adjudicated PHI.** They demonstrate the sensitive-data handling the brief asks for; no rule reads them.
 15. **`units` per line defaults to 1.** Multi-unit lines are supported but seed data uses 1.
 16. **Intake reject = HTTP `4xx`, never persisted** (no `REJECTED` state). Member *existence* is an intake reject; policy *active-on-date* is an adjudication deny.
+17. **Adjudication outcomes are decisions, not errors.** Every denial (`NO_COVERAGE`, `EXCLUDED`, `PRIOR_AUTH_REQUIRED`, `LIMIT_EXCEEDED`, `POLICY_NOT_ACTIVE`, `DUPLICATE_LINE_ITEM`) returns HTTP `200` with a reason code + explanation. Only malformed/identity-failed input is HTTP `4xx`.

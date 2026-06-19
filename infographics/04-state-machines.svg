@@ -1,0 +1,137 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 820" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <marker id="ar4" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#64748b" stroke-width="1.5"/>
+    </marker>
+  </defs>
+
+  <rect width="900" height="820" fill="#fafafa"/>
+
+  <text x="40" y="46" font-size="24" font-weight="700" fill="#1e293b">04 · State machines &amp; aggregation</text>
+  <text x="40" y="72" font-size="14" fill="#64748b">Two state machines, one aggregation function. The claim state is derived, never set directly.</text>
+
+  <!-- ===== LINE ITEM STATE MACHINE ===== -->
+  <text x="40" y="120" font-size="16" font-weight="700" fill="#3730a3">LineItem state machine</text>
+  <text x="40" y="140" font-size="12" fill="#64748b">Owned by the adjudication engine. Each line item moves independently.</text>
+
+  <g>
+    <!-- PENDING -->
+    <ellipse cx="120" cy="220" rx="60" ry="30" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="120" y="225" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">PENDING</text>
+
+    <!-- APPROVED -->
+    <ellipse cx="380" cy="170" rx="60" ry="30" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="380" y="175" font-size="13" font-weight="700" fill="#0f766e" text-anchor="middle">APPROVED</text>
+
+    <!-- DENIED -->
+    <ellipse cx="380" cy="220" rx="60" ry="30" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="380" y="225" font-size="13" font-weight="700" fill="#991b1b" text-anchor="middle">DENIED</text>
+
+    <!-- NEEDS_REVIEW -->
+    <ellipse cx="380" cy="270" rx="68" ry="30" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="380" y="275" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">NEEDS_REVIEW</text>
+
+    <!-- PAID -->
+    <ellipse cx="640" cy="195" rx="50" ry="30" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="640" y="200" font-size="13" font-weight="700" fill="#3730a3" text-anchor="middle">PAID</text>
+
+    <!-- transitions from PENDING -->
+    <line x1="180" y1="210" x2="320" y2="175" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="240" y="180" font-size="10" fill="#64748b">adjudicate · ok</text>
+
+    <line x1="180" y1="220" x2="320" y2="220" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="240" y="215" font-size="10" fill="#64748b">adjudicate · deny</text>
+
+    <line x1="180" y1="230" x2="312" y2="263" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="240" y="260" font-size="10" fill="#64748b">prior auth missing</text>
+
+    <!-- to PAID -->
+    <line x1="440" y1="170" x2="592" y2="190" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="510" y="175" font-size="10" fill="#64748b">recordPayment</text>
+
+    <!-- NEEDS_REVIEW back -->
+    <path d="M 320 285 Q 280 320 320 280" stroke="#dc2626" stroke-width="1.5" fill="none" marker-end="url(#ar4)" stroke-dasharray="4 3"/>
+    <text x="460" y="335" font-size="10" fill="#991b1b" font-style="italic">dispute reopens DENIED → NEEDS_REVIEW · re-adjudicates</text>
+    <path d="M 380 250 Q 460 320 380 250" stroke="#dc2626" stroke-width="1.5" fill="none" stroke-dasharray="4 3"/>
+  </g>
+
+  <line x1="40" y1="380" x2="860" y2="380" stroke="#cbd5e1"/>
+
+  <!-- ===== CLAIM STATE MACHINE ===== -->
+  <text x="40" y="416" font-size="16" font-weight="700" fill="#3730a3">Claim state machine</text>
+  <text x="40" y="436" font-size="12" fill="#64748b">Derived from line-item states. Claim state is computed by claimStateFrom(lineItems), never set directly.</text>
+
+  <g>
+    <ellipse cx="100" cy="510" rx="60" ry="28" fill="#e2e8f0" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="100" y="515" font-size="12" font-weight="700" fill="#475569" text-anchor="middle">SUBMITTED</text>
+
+    <ellipse cx="280" cy="510" rx="70" ry="28" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="280" y="515" font-size="12" font-weight="700" fill="#92400e" text-anchor="middle">UNDER_REVIEW</text>
+
+    <ellipse cx="480" cy="470" rx="60" ry="28" fill="#ccfbf1" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="480" y="475" font-size="12" font-weight="700" fill="#0f766e" text-anchor="middle">APPROVED</text>
+
+    <ellipse cx="480" cy="510" rx="60" ry="28" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+    <text x="480" y="515" font-size="12" font-weight="700" fill="#991b1b" text-anchor="middle">DENIED</text>
+
+    <ellipse cx="480" cy="552" rx="78" ry="28" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="480" y="557" font-size="12" font-weight="700" fill="#92400e" text-anchor="middle">PARTIALLY_APPR.</text>
+
+    <ellipse cx="700" cy="510" rx="50" ry="28" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+    <text x="700" y="515" font-size="12" font-weight="700" fill="#3730a3" text-anchor="middle">PAID</text>
+
+    <!-- transitions -->
+    <line x1="160" y1="510" x2="210" y2="510" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="185" y="503" font-size="10" fill="#64748b" text-anchor="middle">begin</text>
+
+    <line x1="350" y1="500" x2="420" y2="475" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <line x1="350" y1="510" x2="420" y2="510" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <line x1="350" y1="520" x2="402" y2="548" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="370" y="468" font-size="10" fill="#64748b">aggregate</text>
+
+    <line x1="540" y1="475" x2="652" y2="500" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <line x1="540" y1="510" x2="650" y2="510" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <line x1="558" y1="548" x2="660" y2="525" stroke="#64748b" stroke-width="1.5" marker-end="url(#ar4)"/>
+    <text x="600" y="495" font-size="10" fill="#64748b">recordPayment</text>
+
+    <!-- dispute loop -->
+    <path d="M 480 580 Q 280 640 280 538" stroke="#dc2626" stroke-width="1.5" fill="none" marker-end="url(#ar4)" stroke-dasharray="5 3"/>
+    <text x="380" y="640" font-size="10" fill="#991b1b" font-style="italic" text-anchor="middle">any dispute · back to UNDER_REVIEW</text>
+  </g>
+
+  <line x1="40" y1="680" x2="860" y2="680" stroke="#cbd5e1"/>
+
+  <!-- ===== AGGREGATION TABLE ===== -->
+  <text x="40" y="710" font-size="16" font-weight="700" fill="#3730a3">Aggregation — line-item states → claim state</text>
+  <text x="40" y="728" font-size="12" fill="#64748b">claimStateFrom(items: LineItem[]) — a pure function with exhaustive tests.</text>
+
+  <g transform="translate(40, 742)">
+    <!-- table headers -->
+    <rect x="0" y="0" width="180" height="28" fill="#ccfbf1"/>
+    <text x="90" y="18" font-size="11" font-weight="700" fill="#0f766e" text-anchor="middle">All APPROVED</text>
+
+    <rect x="180" y="0" width="180" height="28" fill="#fee2e2"/>
+    <text x="270" y="18" font-size="11" font-weight="700" fill="#991b1b" text-anchor="middle">All DENIED</text>
+
+    <rect x="360" y="0" width="220" height="28" fill="#e0e7ff"/>
+    <text x="470" y="18" font-size="11" font-weight="700" fill="#3730a3" text-anchor="middle">Mixed approved/denied</text>
+
+    <rect x="580" y="0" width="240" height="28" fill="#fef3c7"/>
+    <text x="700" y="18" font-size="11" font-weight="700" fill="#92400e" text-anchor="middle">Any NEEDS_REVIEW present</text>
+
+    <!-- table values -->
+    <rect x="0" y="28" width="180" height="40" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="90" y="54" font-size="13" font-weight="700" fill="#0f766e" text-anchor="middle">→ APPROVED</text>
+
+    <rect x="180" y="28" width="180" height="40" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="270" y="54" font-size="13" font-weight="700" fill="#991b1b" text-anchor="middle">→ DENIED</text>
+
+    <rect x="360" y="28" width="220" height="40" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="470" y="54" font-size="13" font-weight="700" fill="#3730a3" text-anchor="middle">→ PARTIALLY_APPROVED</text>
+
+    <rect x="580" y="28" width="240" height="40" fill="#ffffff" stroke="#e2e8f0"/>
+    <text x="700" y="54" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">→ UNDER_REVIEW (overrides above)</text>
+  </g>
+
+  <text x="40" y="810" font-size="12" fill="#64748b" font-style="italic">"Any NEEDS_REVIEW" overrides everything else. Claim cannot be terminal while any line is still pending review.</text>
+</svg>

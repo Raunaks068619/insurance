@@ -79,18 +79,23 @@ path. Cost: the accumulator and limit check become unit-aware (small). This is a
 step beyond the brief's literal ask, justified by domain research.
 **Reversible?:** Moderate — touches the accumulator's limit column and the limit step.
 
-### 8 — `NEEDS_REVIEW` line state exists; prior-auth routing is PROVISIONAL (C3)
+### 8 — Prior-auth missing → clean DENY (RESOLVED in C3 brainstorm)
 
-> **Status: PROVISIONAL — adjudication (C3) is not yet locked.** Only the *state* is locked
-> here; the *routing rule* is confirmed when we brainstorm C3, not before.
+> **Status: RESOLVED** (C3 brainstorm, this session). Supersedes the earlier provisional
+> `NEEDS_REVIEW` lean.
 
-**Locked (artifact-level):** `NEEDS_REVIEW` is a valid line-item state; the claim aggregates
-to `UNDER_REVIEW` while any line is in review (infographic 04).
-**Provisional (C3 behavior, to confirm):** that a prior-auth-missing line *routes to*
-`NEEDS_REVIEW` rather than a clean `DENIED`. The brief's *"1 needs review"* and infographic 04
-point this way, but it is an adjudication decision — it stays provisional until the C3
-brainstorm, and it would revise #7 if confirmed.
-**Open (Q6):** with no human-reviewer queue, how a `NEEDS_REVIEW` line resolves in v1.
+**Chose:** A prior-auth-required line with no auth present → a clean `DENIED` line carrying
+`PRIOR_AUTH_REQUIRED`, payable 0, with an explanation. It is an adjudication **decision**
+(HTTP 200), never an error.
+**Over:** Routing it to `NEEDS_REVIEW` (the brief's *"1 needs review"* lean).
+**Trade-off:** With no human-reviewer queue in scope, a `NEEDS_REVIEW` line would never
+resolve and would freeze claim aggregation at `UNDER_REVIEW` forever. A clean deny is
+deterministic and fully explainable — the brief's "explain why it was denied" is satisfied by
+the reason code + sentence. Cost: we don't showcase a review-queue flow (out of scope anyway).
+`NEEDS_REVIEW` survives as a state but is reached **only** via a dispute reopen, and clears by
+immediate auto re-adjudication (Q4 lean). This resolves the old Q6.
+**Reversible?:** Yes — prior-auth returns a single routing flag; swapping to `NEEDS_REVIEW`
+is a one-line change if a queue is ever added.
 
 ### 9 — Capture `diagnosis_code` + `provider` as encrypted, non-adjudicated PHI
 
@@ -126,6 +131,29 @@ no appeal) and avoids bloating the frozen claim state machine. Cost: no built-in
 of bad submissions — if needed, log them separately, not as Claim rows.
 **Reversible?:** Yes — a reject log can be added without touching the claim machine.
 
+### 12 — Adjudication outcomes are decisions (HTTP 200), not errors
+
+**Chose:** Every adjudication outcome — including all denials (`NO_COVERAGE`, `EXCLUDED`,
+`PRIOR_AUTH_REQUIRED`, `LIMIT_EXCEEDED`, `POLICY_NOT_ACTIVE`, `DUPLICATE_LINE_ITEM`) — returns
+HTTP `200` with `status` + `reason` + `explanation`. A denied line is a *processed* line.
+Only malformed/identity-failed **input** is an HTTP `4xx` (the C2 intake reject, decision #11).
+**Over:** Treating a business denial (e.g. prior-auth missing) as an HTTP error.
+**Trade-off:** Errors explain nothing to a member and would break the brief's *"5 line items,
+1 denied"* scenario and *"explain why it was denied."* A decision carries the explanation.
+Cost: callers must read per-line status, not just the HTTP code — correct and intended.
+**Reversible?:** N/A — this is the core contract of the engine.
+
+### 13 — `prior_auth_present` defaults to `true` on input (absence = auth present)
+
+**Chose:** When a line item omits `prior_auth_present`, treat it as `true`. The
+`PRIOR_AUTH_REQUIRED` denial path fires only on an explicit `false`.
+**Over:** Defaulting to `false` (absence = no auth).
+**Trade-off:** Most services don't require prior auth, so a `true` default keeps the common
+input frictionless; callers assert `false` only when relevant. Cost: a caller who forgets to
+send `false` for an auth-required service is assumed to have had auth — an accepted demo
+simplification, documented here. (Real systems treat absence as unauthorized.)
+**Reversible?:** Yes — a one-line default change.
+
 ---
 
 ## Decisions resolved this framing session
@@ -136,17 +164,17 @@ of bad submissions — if needed, log them separately, not as Claim rows.
 
 ## Decisions still open (resolve and move up)
 
-- **C3 Adjudication engine — STILL REMAINING (the big one).** The entire adjudication
-  *behavior* is not yet brainstormed/locked: step order, prior-auth routing (`NEEDS_REVIEW`
-  vs deny), `reasons[]` population, cost-share math, limit straddle, OOP cap, atomic
-  accumulator writeback, and the line→claim aggregation detail. Only the artifact *shapes*
-  it reads/writes are locked.
-- **Dispute resolution (Q4)** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable original). C6.
-- **NEEDS_REVIEW resolution (Q6)** — how a review-pending line clears in a v1 with no human queue.
+- **Dispute resolution (Q4)** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable
+  original). C6 — does not block core adjudication TDD (cycles 1–25); confirm before cycle 27.
 
 ## Decisions resolved (moved up)
 
 - **Duplicate handling (Q5)** — RESOLVED: fingerprint computed at intake; soft `DUPLICATE_LINE_ITEM` decided at adjudication. See decision #11 / TRACK #12.
+- **C3 adjudication behavior** — RESOLVED (this session): full pipeline, cost-share math,
+  determinism, accumulator writeback, and the TDD build order are planned in
+  [`docs/adjudication-plan.md`](adjudication-plan.md). Ready to test-drive.
+- **Prior-auth routing (was Q6 / decision #8)** — RESOLVED: clean DENY, not `NEEDS_REVIEW`.
+  See decision #8.
 
 ## Assumptions about the domain
 
@@ -158,5 +186,7 @@ of bad submissions — if needed, log them separately, not as Claim rows.
 6. Determinism over wall-clock; concurrency beyond SQLite's single-writer is out of scope.
 7. One cost-share mechanism per service; copay-then-coinsurance approximated by dominant component.
 8. Limits are unit-typed (`dollars` or `visits`); supply-window/replacement-frequency limits out of scope.
+9. `prior_auth_present` defaults to `true` on input (absence = auth present); denial fires only on explicit `false`.
+10. Adjudication denials are decisions (HTTP 200 + reason + explanation); only malformed/identity input is HTTP 4xx.
 
 _Add to this list whenever the build forces a judgment call the assignment left open._

@@ -53,7 +53,7 @@ type LineItem = {
   serviceCode: string;          // closed 12-entry catalog; unlisted → NO_COVERAGE
   billedCents: number;          // positive integer (allowed == billed in v1)
   units: number;                // default 1
-  priorAuthPresent: boolean;    // default false
+  priorAuthPresent: boolean;    // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
   status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
   fingerprint: string;          // memberId + serviceCode + serviceDate + billedCents
 };
@@ -114,7 +114,7 @@ Per line item, short-circuiting on denial. The cost-share step is a **switch on
 1. Policy active for the service date? else `POLICY_NOT_ACTIVE`.
 2. Rule exists for the service code? else `NO_COVERAGE`.
 3. Covered and not excluded? else `EXCLUDED` / `NO_COVERAGE`.
-4. Prior auth satisfied if required? else `PRIOR_AUTH_REQUIRED`.
+4. Prior auth satisfied if required? else `PRIOR_AUTH_REQUIRED` — a clean `DENIED`, not `NEEDS_REVIEW` (decision #8).
 5. Limit remaining? `none` → skip; `visits` → if count used up, `LIMIT_EXCEEDED` (whole-visit, no straddle); `dollars` → if exhausted, `LIMIT_EXCEEDED` (partial straddle in 7b).
 6. Compute allowed (v1: allowed = billed).
 7. Apply cost-share — switch on `costShare.type`:
@@ -125,8 +125,10 @@ Per line item, short-circuiting on denial. The cost-share step is a **switch on
 8. Apply OOP cap (once OOP max reached, plan pays 100%, `OOP_MAX_REACHED`).
 9. Writeback: persist adjudication; increment deductible/OOP atomically and `limit_used` in the rule's unit (dollars: += plan pay; visits: += 1).
 
-Worked numeric examples: _add 2–3 once the adjudicator is implemented (deductible
-crossing, coinsurance odd-cents, dollar-limit straddle, visit-limit exhaustion, OOP cap)._
+Full pipeline (gates vs math), the `adjudicate()` contract, cost-share math, determinism,
+accumulator writeback, a worked numeric example, and the TDD build order live in
+[`adjudication-plan.md`](adjudication-plan.md). Add more worked examples here as the
+adjudicator is implemented.
 
 ## State machines
 
@@ -153,9 +155,10 @@ a dispute reopens `DENIED → NEEDS_REVIEW`. `PARTIALLY_APPROVED` is **claim-lev
 a line state. (These supersede the `SUBMITTED`/`ADJUDICATING`/line-level-`PARTIALLY_APPROVED`
 names sketched above.)
 
-Transition table + guards, and the **prior-auth → `NEEDS_REVIEW` routing** (provisional), are
-finalized with C3/C4 adjudication & lifecycle work — not locked here. Illegal transitions
-must be rejected, not silently ignored.
+Prior-auth-missing is a clean `DENIED`, **not** `NEEDS_REVIEW` (decision #8, resolved);
+`NEEDS_REVIEW` is reached only via a dispute reopen and clears by auto re-adjudication. Full
+transition tables + guards are finalized with the C4 lifecycle work; illegal transitions must
+be rejected, not silently ignored.
 
 ### Aggregation (line items → claim status)
 

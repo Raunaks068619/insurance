@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Claims System — Visual Reference</title>
+<style>
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --text: #1e293b;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --indigo: #6366f1;
+    --teal: #14b8a6;
+    --amber: #f59e0b;
+    --red: #dc2626;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.6;
+  }
+  .container { max-width: 980px; margin: 0 auto; padding: 48px 24px; }
+  header { margin-bottom: 56px; }
+  header h1 {
+    font-size: 36px;
+    font-weight: 800;
+    margin: 0 0 12px;
+    letter-spacing: -0.5px;
+  }
+  header .lede { font-size: 17px; color: var(--muted); margin: 0; max-width: 720px; }
+  section { margin-bottom: 72px; }
+  section h2 {
+    font-size: 24px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid var(--border);
+  }
+  section .summary { color: var(--muted); margin: 0 0 28px; max-width: 720px; }
+  .figure {
+    background: var(--surface);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border);
+    overflow-x: auto;
+  }
+  .figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+  .takeaways {
+    background: #f1f5f9;
+    border-left: 3px solid var(--indigo);
+    padding: 16px 20px;
+    border-radius: 6px;
+    margin-top: 16px;
+  }
+  .takeaways h3 {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 0 0 8px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .takeaways ul { margin: 0; padding-left: 20px; }
+  .takeaways li { margin: 6px 0; }
+  code {
+    background: #f1f5f9;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-family: 'SF Mono', Monaco, Consolas, monospace;
+  }
+  footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>Claims System · Visual Reference</h1>
+  <p class="lede">
+    Four diagrams that explain the whole system: money flow, domain model,
+    adjudication pipeline, and state machines. Use this for pairing-round
+    walkthroughs and to align any future agent (or human) on the model.
+  </p>
+</header>
+
+<section>
+  <h2>01 · The money flow</h2>
+  <p class="summary">
+    A claim is a request for reimbursement. Adjudication splits the billed
+    amount across member-owed slices (deductible, copay, coinsurance) and the
+    insurer's payable share. The order matters: change it and every downstream
+    dollar is wrong.
+  </p>
+  <div class="figure">
+    <object type="image/svg+xml" data="01-money-flow.svg" aria-label="Money flow diagram"></object>
+  </div>
+  <div class="takeaways">
+    <h3>What this proves</h3>
+    <ul>
+      <li>Adjudication is <strong>deterministic</strong>. Same inputs → same outputs, every time. This is testable.</li>
+      <li>Money is stored as <strong>integer cents</strong>. Float arithmetic on money is the most common claims bug in industry.</li>
+      <li>The EOB is not a separate report — it falls out of the adjudication's reason codes. One source of truth.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>02 · The domain model</h2>
+  <p class="summary">
+    Two bounded contexts. The <strong>adjudication context</strong> is pure
+    functions, no I/O. The <strong>submission context</strong> handles the wire
+    envelope. The seam between them is the only place persistence happens.
+    This separation is what keeps the engine testable.
+  </p>
+  <div class="figure">
+    <object type="image/svg+xml" data="02-domain-model.svg" aria-label="Domain model diagram"></object>
+  </div>
+  <div class="takeaways">
+    <h3>What this proves</h3>
+    <ul>
+      <li><strong>CoverageRule is data</strong>, not code. A typed config object — not a DSL — is the 80/20 within 48h.</li>
+      <li><strong>Accumulator</strong> is the system's short-term memory. Reading it before adjudication and writing it after is the only transactional step the engine has.</li>
+      <li>The <strong>Claim → LineItem 1:N</strong> relationship is why partial approvals exist. The system grades each line independently and rolls up.</li>
+      <li><strong>Dispute</strong> doesn't mutate the original adjudication — it reopens a line item and produces a new one with a <code>DISPUTED_OVERRIDE</code> reason. History is preserved.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>03 · The 11-step adjudication pipeline</h2>
+  <p class="summary">
+    Each line item runs through these 11 steps in this exact order. Steps 1-5
+    can short-circuit with a denial reason. Steps 6-11 do the arithmetic and
+    always run to completion. Each step is a pure function. Each reason code
+    has at least one test.
+  </p>
+  <div class="figure">
+    <object type="image/svg+xml" data="03-adjudication-pipeline.svg" aria-label="Adjudication pipeline"></object>
+  </div>
+  <div class="takeaways">
+    <h3>What this proves</h3>
+    <ul>
+      <li>The pipeline is <strong>composable pure functions</strong>, not a single mega-function. Each step takes <code>(state, line_item, policy)</code> and returns either continuation or short-circuit.</li>
+      <li>A line item can carry <strong>multiple reason codes</strong>. A typical approved claim carries <code>DEDUCTIBLE_APPLIED</code> + <code>COPAY_APPLIED</code> + <code>COINSURANCE_APPLIED</code> simultaneously.</li>
+      <li>The <strong>writeAccumulator</strong> step happens exactly once, at the end. No partial writes, no race conditions within a single adjudication.</li>
+      <li>Adding a new reason code is <strong>localized</strong>: one new step (or one branch in an existing step), one explanation template, one test. The shape of the system absorbs the change.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>04 · State machines &amp; aggregation</h2>
+  <p class="summary">
+    Two state machines move independently. The <strong>line-item</strong>
+    machine is what the engine produces directly. The <strong>claim</strong>
+    machine is <em>derived</em> from line-item states via the aggregation
+    function — it is never set directly.
+  </p>
+  <div class="figure">
+    <object type="image/svg+xml" data="04-state-machines.svg" aria-label="State machines and aggregation"></object>
+  </div>
+  <div class="takeaways">
+    <h3>What this proves</h3>
+    <ul>
+      <li>Claim state is <strong>derived</strong>, not stored. <code>claimStateFrom(items)</code> is a pure function. This eliminates an entire class of "claim says approved but line items say denied" bugs.</li>
+      <li>The aggregation table has <strong>exhaustive test coverage</strong>: each row is one test case. <code>NEEDS_REVIEW</code> overrides everything else, which is the rule a real claims adjuster would expect.</li>
+      <li>The <strong>dispute loop</strong> reopens any terminal state. From a state-machine perspective, terminal isn't actually terminal — it's "terminal-until-disputed."</li>
+      <li>The <strong>PAID</strong> transition is the only one that requires a side effect (recording payment). Everything else is in-memory state arithmetic.</li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  Generated for the realfast FDE Level-1 take-home · drop into <code>docs/</code> as visual reference for the round-2 pairing session.
+</footer>
+
+</div>
+</body>
+</html>
