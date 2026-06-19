@@ -1,0 +1,5 @@
+# pnpm 11 reads project settings here (no longer from package.json's "pnpm" field).
+# Allow these packages to run their install/build scripts (vitest needs esbuild's binary).
+allowBuilds:
+  "@biomejs/biome": true
+  esbuild: true
