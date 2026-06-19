@@ -34,7 +34,7 @@ export type AdjudicateLineResult = {
 };
 
 export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult {
-  const { rule, line, policy, serviceDate, alreadyAdjudicated } = input;
+  const { rule, line, policy, serviceDate, acc, alreadyAdjudicated } = input;
 
   // Every gate denial shares one shape: plan pays nothing, member owes nothing here
   // (a non-covered service is billed to the member directly, not as cost-share), and
@@ -128,5 +128,35 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     };
   }
 
-  throw new Error("adjudicateLine: coinsurance math not yet implemented (TDD cycles 10+)");
+  // Cycle 10–13 — coinsurance: the deductible draws first (when applies_deductible), then the
+  // member pays `rate` of the remainder. Rounding lives only on the coinsurance share; `plan`
+  // is computed last as `allowed − member`, so the shares always sum to allowed (no lost cent).
+  if (rule.costShare.type === "coinsurance") {
+    const allowedCents = line.billedCents;
+    const remainingDeductibleCents = Math.max(0, policy.deductibleCents - acc.deductibleMetCents);
+    const dedPortionCents = rule.appliesDeductible
+      ? Math.min(remainingDeductibleCents, allowedCents)
+      : 0;
+    const remainderCents = allowedCents - dedPortionCents;
+    const coinsPortionCents = Math.round(rule.costShare.rate * remainderCents); // half-up
+    const memberCents = dedPortionCents + coinsPortionCents;
+    const planCents = allowedCents - memberCents;
+
+    const reasons: ReasonCode[] = [ReasonCode.APPROVED];
+    if (dedPortionCents > 0) reasons.push(ReasonCode.DEDUCTIBLE_APPLIED);
+    reasons.push(ReasonCode.COINSURANCE_APPLIED);
+
+    const ratePct = Math.round(rule.costShare.rate * 100);
+    const dedNote = dedPortionCents > 0 ? `${formatUsd(dedPortionCents)} toward your deductible plus ` : "";
+    return {
+      status: "APPROVED",
+      payableCents: planCents,
+      memberResponsibilityCents: memberCents,
+      reasons,
+      explanation: `Coinsurance: you pay ${formatUsd(memberCents)} (${dedNote}${ratePct}% of ${formatUsd(remainderCents)}); the plan pays ${formatUsd(planCents)}.`,
+      deltas: { deductibleIncCents: dedPortionCents, oopIncCents: memberCents, limitInc: 0 },
+    };
+  }
+
+  throw new Error("adjudicateLine: unreachable — unhandled cost-share type");
 }

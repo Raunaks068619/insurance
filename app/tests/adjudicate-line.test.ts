@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { adjudicateLine } from "../src/domain/adjudication/adjudicator";
-import { aCoverageRule, aLineItem, anAdjudicateInput } from "./builders";
+import { aCoverageRule, aLineItem, anAccumulator, anAdjudicateInput } from "./builders";
 
 describe("adjudicateLine — no coverage rule", () => {
   it("denies the line with NO_COVERAGE and pays nothing when no rule matches the service", () => {
@@ -174,5 +174,79 @@ describe("adjudicateLine — copay", () => {
     expect(result.payableCents).toBe(0); // plan pays nothing
     expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 3_000, limitInc: 0 });
     expect(result.reasons).toEqual(["APPROVED", "COPAY_APPLIED"]);
+  });
+});
+
+describe("adjudicateLine — coinsurance", () => {
+  it("charges the coinsurance rate on the full allowed when the deductible is already met", () => {
+    // Arrange — 20% coinsurance, deductible fully met → no deductible draw.
+    const rule = aCoverageRule({
+      serviceCode: "IMAGING",
+      costShare: { type: "coinsurance", rate: 0.2 }, // member pays 20%
+      appliesDeductible: true,
+    });
+    const line = aLineItem({ serviceCode: "IMAGING", billedCents: 10_000 }); // $100.00
+    const acc = anAccumulator({ deductibleMetCents: 50_000 }); // = policy deductible → met
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(2_000); // 20% of $100
+    expect(result.payableCents).toBe(8_000); // plan pays the other 80%
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(line.billedCents);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 2_000, limitInc: 0 });
+    expect(result.reasons).toEqual(["APPROVED", "COINSURANCE_APPLIED"]);
+  });
+
+  it("sends the whole amount to the deductible (coinsurance 0, plan 0) when allowed is below the remaining deductible", () => {
+    // Arrange — fresh $500 deductible; a $300 service is fully absorbed by it.
+    const rule = aCoverageRule({
+      serviceCode: "SURGERY",
+      costShare: { type: "coinsurance", rate: 0.2 },
+      appliesDeductible: true,
+    });
+    const line = aLineItem({ serviceCode: "SURGERY", billedCents: 30_000 }); // $300.00
+    const acc = anAccumulator({ deductibleMetCents: 0 }); // remaining deductible = $500
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(30_000); // all to deductible
+    expect(result.payableCents).toBe(0); // plan pays nothing until the deductible is met
+    expect(result.deltas).toEqual({ deductibleIncCents: 30_000, oopIncCents: 30_000, limitInc: 0 });
+    expect(result.reasons).toEqual(["APPROVED", "DEDUCTIBLE_APPLIED", "COINSURANCE_APPLIED"]);
+  });
+
+  it("splits a deductible-crossing line into deductible draw + coinsurance on the remainder", () => {
+    // Arrange — $200 of a $500 deductible met; a $1,200 surgery crosses it.
+    const rule = aCoverageRule({
+      serviceCode: "SURGERY",
+      costShare: { type: "coinsurance", rate: 0.2 },
+      appliesDeductible: true,
+    });
+    const line = aLineItem({ serviceCode: "SURGERY", billedCents: 120_000 }); // $1,200.00
+    const acc = anAccumulator({ deductibleMetCents: 20_000 }); // remaining deductible = $300
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    // $300 finishes the deductible; 20% of the remaining $900 = $180. Member = $480.
+    expect(result.memberResponsibilityCents).toBe(48_000);
+    expect(result.payableCents).toBe(72_000);
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(line.billedCents);
+    expect(result.deltas).toEqual({ deductibleIncCents: 30_000, oopIncCents: 48_000, limitInc: 0 });
+    expect(result.reasons).toEqual(["APPROVED", "DEDUCTIBLE_APPLIED", "COINSURANCE_APPLIED"]);
+  });
+
+  it("rounds the coinsurance share half-up and never loses a cent (member + plan === allowed)", () => {
+    // Arrange — 20% of $33.33 = $6.666 → rounds half-up to $6.67; deductible already met.
+    const rule = aCoverageRule({
+      serviceCode: "IMAGING",
+      costShare: { type: "coinsurance", rate: 0.2 },
+      appliesDeductible: true,
+    });
+    const line = aLineItem({ serviceCode: "IMAGING", billedCents: 3_333 }); // $33.33
+    const acc = anAccumulator({ deductibleMetCents: 50_000 }); // met → pure coinsurance
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.memberResponsibilityCents).toBe(667); // round(0.20 × 3333) = round(666.6)
+    expect(result.payableCents).toBe(2_666); // computed as allowed − member
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(3_333); // no lost cent
   });
 });
