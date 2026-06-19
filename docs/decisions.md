@@ -217,6 +217,25 @@ stays in the enum as the v2 reviewer-override slot.
 **Reversible?:** Yes — `corrected{}` is additive; a reviewer/override path and whole-claim cascade
 can layer on later.
 
+### 17 — Claim aggregation: derive `PARTIALLY_APPROVED` from a line's reason code, not a partial line state
+
+> **Status: IMPLEMENTED** (cycles 22–25, this session — `aggregateClaimStatus`).
+
+**Chose:** `aggregateClaimStatus(lines)` derives the claim status from line outcomes — every line
+`DENIED` → `DENIED`; **any** `DENIED` **or** any `APPROVED` line carrying `LIMIT_EXCEEDED` (a
+dollar-limit straddle) → `PARTIALLY_APPROVED`; otherwise `APPROVED`. It reads a minimal
+`LineOutcome = { status, reasons }`. The `UNDER_REVIEW` branch (any `NEEDS_REVIEW` line) is
+deferred until the dispute cycles.
+**Over:** (a) a partial / `PARTIALLY_APPROVED` **line** state; (b) threading a separate `isPartial`
+flag out of the adjudicator; (c) passing the full adjudication result into the aggregator.
+**Trade-off:** A straddle already records `LIMIT_EXCEEDED` on an otherwise-`APPROVED` line, so the
+reason code is a faithful partial-payout signal — no new state, and `PARTIALLY_APPROVED` stays
+**claim-level-only** (the locked line/claim split, decisions #14/#19). The minimal `LineOutcome`
+keeps the pure aggregator decoupled from the persistence/result shape. Deferring `UNDER_REVIEW`
+follows TDD minimalism — no test demands it until disputes (cycles 32–36). Cost: aggregation
+depends on the adjudicator emitting `LIMIT_EXCEEDED` on a straddle (covered by cycles 17 + 25).
+**Reversible?:** Yes — additive; the `UNDER_REVIEW` branch is a one-line add when disputes need it.
+
 ---
 
 ## Decisions resolved this framing session
