@@ -91,10 +91,10 @@ Rounding lives only on `coinsPortion`; `plan = allowed − member` guarantees th
 | every line `APPROVED` (full payable) | `APPROVED` |
 | mix of `APPROVED` + `DENIED`, or any dollar-straddle partial | `PARTIALLY_APPROVED` |
 | any line `NEEDS_REVIEW` / disputed re-adjudicating | `UNDER_REVIEW` |
-| every payable line `PAID`, none open | `PAID` |
 
 `PARTIALLY_APPROVED` is **claim-level only** — never a line state. A straddled line is itself
-`APPROVED` (partial payable) with a `LIMIT_EXCEEDED` note.
+`APPROVED` (partial payable) with a `LIMIT_EXCEEDED` note. **No `PAID` state in v1** — claims
+end at `APPROVED` / `PARTIALLY_APPROVED` / `DENIED` (decision #14).
 
 ## Decisions vs errors (the boundary)
 
@@ -144,7 +144,7 @@ demonstrated in stance, not over-built for a 24–48h take-home.
 
 ## TDD build order — one behavior per red→green cycle
 
-Tests 1–25 are pure (no DB). 26–27 touch SQLite.
+Tests 1–25 are pure (no DB). 26–31 touch SQLite.
 
 ```
 GATES (pure denials)
@@ -186,7 +186,13 @@ AGGREGATION (line[] → claim)
 
 WRITEBACK / INTEGRATION (SQLite)
 26. full claim through the real store: accumulators persist, adjudications append-only, one txn
-27. dispute reopens a line, re-adjudicates, preserves the original immutably          (last)
+27. dispute reopens a line, re-adjudicates, preserves the original immutably
+
+STATUS-TRANSITION LOG (SQLite) — decision #15
+28. setStatus appends one transition row {entity, from, to, actor, reason, seq}; from null on create
+29. full claim submit→adjudicate→aggregate logs the ordered transition set (correct seq order)
+30. re-run identical claim → identical transition rows except created_at (determinism)
+31. dispute reopen logs DENIED→NEEDS_REVIEW (actor MEMBER) then the auto re-adjudication transition; originals untouched   (last)
 ```
 
 ## Worked example
@@ -221,10 +227,36 @@ WRITEBACK / INTEGRATION (SQLite)
 line satisfies `payable + member == billed`. Accumulators after: `DEDUCTIBLE 50000c`, `OOP 70500c`.
 Re-running on the same starting snapshot reproduces these exact numbers.
 
+## Status-transition audit log (decision #15)
+
+One shared, append-only table records every claim/line status change — the member-facing
+lifecycle timeline. Status columns stay the source of truth; the log is never replayed to
+derive state (not event sourcing).
+
+```
+status_transition(
+  entity_type 'CLAIM' | 'LINE_ITEM',  entity_id,
+  from_status,  to_status,
+  actor   'SYSTEM' | 'MEMBER',
+  reason  'SUBMIT' | 'ADJUDICATED' | 'AGGREGATED' | 'DISPUTE_REOPEN',   // coarse cause, not a ReasonCode
+  seq,            // injected logical clock — deterministic ordering
+  created_at )    // wall-clock; metadata only, never read by logic/tests
+```
+
+- **One chokepoint:** a single `setStatus()` updates the status column *and* appends the
+  transition in the **same transaction** — the log can't drift from the columns.
+- **4 write sites:** submit (claim + each line) · each line adjudicated · claim roll-up ·
+  dispute reopen. (No settle site — no `PAID` in v1.)
+- **Determinism:** ordering uses `seq`; the timestamp is metadata, so re-runs reproduce
+  identical rows except `created_at`.
+- **Read:** a `timeline` field on `GET /claims/:id` (no new endpoint).
+
 ## Deferred from v1 (do not build)
 
+- settle / `PAID` state — deferred to v2; v1 claim lifecycle ends at APPROVED / PARTIALLY_APPROVED / DENIED (decision #14).
 - copay-**then**-coinsurance stacking (ER) — approximated by the dominant component.
 - visit-limit straddle (visits are whole-unit, hard stop only).
 - out-of-network second cost-share column; fee schedule (allowed ≠ billed).
 - multi-service-date claims; family / Rx accumulators; PPO reduce-to-50% penalty.
 - reviewer queue — disputes auto re-adjudicate (Q4 leaning); no human review state in v1.
+- full event sourcing — the transition log is an audit trail, never replayed to derive state.

@@ -5,13 +5,16 @@ honest and current — the next agent trusts it instead of re-deriving everythin
 
 ## Current focus
 
-Framing + design **closed**. All artifacts/actors locked, C2 intake slice defined, and now the
-**C3 adjudication behavior** is locked: the full pipeline, cost-share math, determinism,
-accumulator writeback, and a 27-step **TDD build order** are written to
-[`docs/adjudication-plan.md`](docs/adjudication-plan.md). **Prior-auth resolved → clean DENY**
-(not `NEEDS_REVIEW`, not an error); this closes the provisional #10 and Q6. **Next: enter
-coding — TDD cycle 1 (`no rule → NO_COVERAGE`), test-first.** Q4 (dispute) still open but does
-not block cycles 1–25. (Still pending housekeeping: regenerate the 3 stale infographics.)
+Framing + design **closed**. C3 adjudication behavior locked in
+[`docs/adjudication-plan.md`](docs/adjudication-plan.md) (pipeline, cost-share math,
+determinism, writeback). **Lifecycle strengthened this session:** dropped `PAID`/settle from v1
+(#19 — claim ends at APPROVED/PARTIALLY_APPROVED/DENIED; dispute reopens → UNDER_REVIEW), and
+added a **status-transition audit log** (#20 — one append-only table via a `setStatus()`
+chokepoint, surfaced on `GET /claims/:id`). **TDD build order now 31 cycles** (28–31 = the
+transition log). **In progress: detailing the dispute events** (what a dispute writes +
+re-adjudication transitions) — then start TDD cycle 1 (`no rule → NO_COVERAGE`). Q4 (dispute
+auto vs queue) still open; being resolved in the dispute-events discussion. (Housekeeping:
+regenerate the 3 stale infographics.)
 
 ## Current phase
 
@@ -41,7 +44,7 @@ Nothing blocked.
 | 5 | 2026-06-18 | Cost-share as a discriminated union (`full_coverage`\|`copay`\|`coinsurance`) | Real benefits (UHC/Aetna/Cigna/BCBS/ACA) use exactly one mechanism per service; union makes the model say it and the adjudicator an exhaustive switch. | No |
 | 6 | 2026-06-18 | Unit-typed limits (`none`\|`dollars`\|`visits`) | The most common real limit is a visit/day cap, which a dollars-only field can't express; dollars still satisfies the brief's "$Y/yr". | No |
 | 7 | 2026-06-18 | Prior-auth = clean denial; OON/network/metal/family omitted | Each stored field must trace to a real adjudication effect in a single-network, per-member, allowed==billed v1. | No |
-| 8 | 2026-06-18 | Reimbursement model (plan → member); PAID via explicit settle action, gateway success assumed | Brief says "claims for reimbursement" and lists `paid` in the lifecycle. No real payment processing in scope → record the transition. Likely a 5th interface action. | No |
+| 8 | 2026-06-18 | Reimbursement model (plan → member); PAID via explicit settle action, gateway success assumed | Brief says "claims for reimbursement" and lists `paid` in the lifecycle. No real payment processing in scope → record the transition. Likely a 5th interface action. | **PAID/settle deferred to v2 — see #19** |
 | 9 | 2026-06-18 | Member = opaque `member_id` anchor; PII minimized/separated, encryption-at-rest candidate | Brief flags sensitive health data; engine adjudicates on `member_id → policy + accumulators` and never needs the name. One human persona (no auth/roles). | No |
 | 10 | 2026-06-18 | `NEEDS_REVIEW` is a valid line state (locked); prior-auth *routing* to it is **PROVISIONAL** | State comes from infographic 04 + brief's "1 needs review". The *routing rule* is C3 adjudication behavior — confirmed in the C3 brainstorm, would revise #7. | **Superseded by #15** |
 | 11 | 2026-06-18 | Capture `diagnosis_code` + `provider` on the Claim as encrypted, non-adjudicated PHI | Brief names them as sensitive data; capturing is where we *demonstrate* the PHI stance. Revises the earlier omit-lean (Fork #2). | No |
@@ -52,6 +55,8 @@ Nothing blocked.
 | 16 | 2026-06-19 | Adjudication outcomes are **decisions (HTTP 200)**, not errors; only malformed/identity input is 4xx | A denial carries a reason + explanation (the brief's "explain why"); an HTTP error explains nothing and breaks the "1 denied line" scenario. | No |
 | 17 | 2026-06-19 | `prior_auth_present` **defaults to `true`** on input (absence = auth present) | Most services need no auth → frictionless common input; denial fires only on explicit `false`. Documented demo simplification. | No |
 | 18 | 2026-06-19 | **C3 adjudication behavior locked** → `docs/adjudication-plan.md` (pipeline, cost-share math, determinism, accumulator writeback, 27-step TDD order) | The "big open" item. Engine is now planned in enough detail to test-drive. Built with System-Architect + DBA agents grounded in the repo docs. | No |
+| 19 | 2026-06-19 | **No `PAID` state / settle in v1** — claim lifecycle ends at APPROVED/PARTIALLY_APPROVED/DENIED; line items at APPROVED/DENIED/NEEDS_REVIEW; dispute reopens → UNDER_REVIEW | The payable *amount* is computed + explained; the PAID *state* needs a settle trigger + gateway (out of scope). Don't model a status we can't truthfully transition. `paid` deferred to v2. Supersedes the PAID half of #8. | No |
+| 20 | 2026-06-19 | **Status-transition audit log** — one append-only polymorphic table via a `setStatus()` chokepoint (4 sites: submit/adjudicated/aggregated/dispute), surfaced on `GET /claims/:id`; not event-sourced | Strengthens lifecycle tracking (a named rubric signal) with ~2 functions; status columns stay source of truth; injected `seq` keeps re-runs deterministic. Adds TDD cycles 28–31. Designed with the System/Solution Architect. | No |
 
 ## Domain research findings (2026-06-18)
 
@@ -77,6 +82,7 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
 | 2026-06-18 | Claude Code (Opus) | 01-framing → 02-domain-research | Ran real-insurer coverage research; locked cost-share union + unit-typed limits + 12-rule seed set; resolved Q1–Q3; propagated to PRD, insurance-domain skill, docs/, and artifacts. | Resolve Q4 (dispute) + Q5 (duplicate), then close framing → design. |
 | 2026-06-18 | Claude Code (Opus) | 01-framing → 02-domain-research | Researched claim intake (UHC/Cigna/Aetna + CMS-1500/837); **locked all artifacts + actors**; defined the C2 intake slice (N1–N5); adopted `NEEDS_REVIEW` + `dx_code`/`provider` PHI capture per the infographics; closed Q5. | `/to-prd` the intake slice; regenerate the 3 stale infographics; resolve Q4/Q6 when adjudication (C3) starts. |
 | 2026-06-19 | Claude Code (Opus) | 03-design | Reviewed framing trajectory (adversarial panel: direction good, was over-framing). Ran System-Architect + DBA agents to **lock C3 adjudication behavior** → wrote `docs/adjudication-plan.md` (pipeline + math + determinism + 27-step TDD order). Resolved prior-auth (clean DENY, #15), decision-vs-error boundary (#16), `prior_auth_present` default true (#17); closed Q6. Propagated across PRD, decisions, domain-model. | **Start TDD cycle 1 (`no rule → NO_COVERAGE`), test-first.** Confirm Q4 before cycle 27. Save this session's JSONL to `ai-artifacts/03-design/`. |
+| 2026-06-19 | Claude Code (Opus) | 03-design | Strengthened lifecycle tracking: **dropped `PAID`/settle from v1** (#19) and locked a **status-transition audit log** (#20, designed with the System/Solution Architect) → TDD now 31 cycles. Propagated across PRD, decisions, domain-model, adjudication-plan, visual-reference. | **Detail the dispute events** (what a dispute writes + its re-adjudication transitions, Q4), then start TDD cycle 1. Save this session's JSONL to `ai-artifacts/03-design/`. |
 
 ## Notes for next agent
 
@@ -84,6 +90,6 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
   existing `.git` is at the root, so the root *is* the project.
 - `project-docs/` holds the original assignment brief. Reference it; do not edit it.
 - Nothing in `app/` yet — first code must arrive via a `/tdd-cycle`, test first.
-- **The adjudication build is fully specced in [`docs/adjudication-plan.md`](docs/adjudication-plan.md)** — the 27-step TDD order is the coding checklist. Cycles 1–25 are pure (no DB); 26–27 touch SQLite.
+- **The adjudication build is fully specced in [`docs/adjudication-plan.md`](docs/adjudication-plan.md)** — the **31-cycle** TDD order is the coding checklist. Cycles 1–25 are pure (no DB); 26–31 touch SQLite (28–31 = the status-transition log).
 - Load the `insurance-domain` + `tdd-discipline` skills before the first cycle.
 - Per the assignment, this design session's raw JSONL must be saved into `ai-artifacts/03-design/` (use `/end-session`).

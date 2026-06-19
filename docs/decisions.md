@@ -154,6 +154,34 @@ send `false` for an auth-required service is assumed to have had auth — an acc
 simplification, documented here. (Real systems treat absence as unauthorized.)
 **Reversible?:** Yes — a one-line default change.
 
+### 14 — No `PAID` state / settle action in v1
+
+**Chose:** The claim lifecycle ends at `APPROVED` / `PARTIALLY_APPROVED` / `DENIED`; line items
+at `APPROVED` / `DENIED` / `NEEDS_REVIEW`. No `PAID` state, no settle/pay endpoint. A dispute
+reopens a terminal claim to `UNDER_REVIEW`.
+**Over:** Modeling `paid` + an explicit settle action (the brief lists `paid` in the lifecycle).
+**Trade-off:** The reimbursement *amount* (`payable_cents`, plan → member) is already computed
+and explained. The `PAID` *state* only records that a disbursement happened — which needs a
+settle trigger and a payment gateway, both out of scope. Modeling a status we can't truthfully
+transition adds a dead state. `paid` is documented as a deferred v2 transition; the
+status-transition log already has the slot for it. Cost: we don't demonstrate the full
+submitted→paid arc.
+**Reversible?:** Yes — add a settle action + `PAID` state later; the transition log is ready.
+
+### 15 — Status-transition audit log (one append-only table, not event-sourced)
+
+**Chose:** One shared polymorphic `status_transition` table (`entity_type`, `entity_id`,
+`from`, `to`, `actor`, `reason`, `seq`, `created_at`) appended via a single `setStatus()`
+chokepoint at 4 sites (submit · adjudicated · aggregated · dispute reopen); surfaced as a
+`timeline` on `GET /claims/:id`.
+**Over:** Two per-entity tables; or full event sourcing (replaying the log to derive state).
+**Trade-off:** Directly serves the brief's *"state machine of a claim vs. line item"* +
+*"track through lifecycle"* with ~2 small functions. Status columns stay the source of truth;
+the log is a parallel audit trail. `actor` is a `SYSTEM | MEMBER` enum (no auth/user entity).
+`seq` is an injected logical clock so re-runs stay deterministic; `created_at` is metadata
+never read by logic/tests. Cost: a small write at each transition; adds TDD cycles 28–31.
+**Reversible?:** Yes — additive; the table can be dropped without touching adjudication.
+
 ---
 
 ## Decisions resolved this framing session
@@ -188,5 +216,7 @@ simplification, documented here. (Real systems treat absence as unauthorized.)
 8. Limits are unit-typed (`dollars` or `visits`); supply-window/replacement-frequency limits out of scope.
 9. `prior_auth_present` defaults to `true` on input (absence = auth present); denial fires only on explicit `false`.
 10. Adjudication denials are decisions (HTTP 200 + reason + explanation); only malformed/identity input is HTTP 4xx.
+11. No `PAID` state / settle in v1; `paid` is a deferred v2 transition (decision #14).
+12. Every status change is recorded in an append-only status-transition log, not event-sourced (decision #15).
 
 _Add to this list whenever the build forces a judgment call the assignment left open._

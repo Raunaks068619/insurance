@@ -24,6 +24,7 @@ explainable: every decision is reproducible from rules + facts + a snapshot of m
 | Adjudication | The immutable decision for a line item (status, payable, member responsibility, reason code, explanation). Append-only. |
 | Accumulator | Persisted per-member-per-plan-year totals: deductible met, OOP met, per-service limit used (in the rule's unit — cents for `dollars`, a count for `visits`). |
 | Dispute | A member challenge that reopens a line item and preserves the prior decision. |
+| StatusTransition | Append-only audit row for every claim/line status change: `from`, `to`, `actor`, `reason`, `seq`. The member-facing lifecycle timeline. |
 
 ```
 Member 1───1 Policy 1───N CoverageRule
@@ -54,7 +55,7 @@ type LineItem = {
   billedCents: number;          // positive integer (allowed == billed in v1)
   units: number;                // default 1
   priorAuthPresent: boolean;    // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
-  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
+  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW (no PAID in v1)
   fingerprint: string;          // memberId + serviceCode + serviceDate + billedCents
 };
 ```
@@ -132,33 +133,36 @@ adjudicator is implemented.
 
 ## State machines
 
+> **v1 scope:** no `PAID` state. The claim lifecycle ends at `APPROVED` / `PARTIALLY_APPROVED`
+> / `DENIED`; settle/payment is deferred (decision #14). A dispute reopens a terminal claim to
+> `UNDER_REVIEW`.
+
 ### Claim lifecycle
 
 ```
-SUBMITTED → UNDER_REVIEW → { APPROVED | PARTIALLY_APPROVED | DENIED } → PAID
-                ▲                                                         │
-                └──────────────── dispute opened ─────────────────────────┘
+SUBMITTED → UNDER_REVIEW → { APPROVED | PARTIALLY_APPROVED | DENIED }   ← terminal in v1
+                ▲                          │
+                └──── dispute opened ──────┘   reopens a terminal claim → UNDER_REVIEW
 ```
 
 ### Line-item lifecycle
 
 ```
-SUBMITTED → ADJUDICATING → { APPROVED | PARTIALLY_APPROVED | DENIED }
-                                   │
-                             dispute opened
-                                   ▼
-                              DISPUTED → re-adjudicate → { APPROVED | PARTIALLY_APPROVED | DENIED } → PAID
+PENDING → ADJUDICATING → { APPROVED | DENIED }
+                              │
+                        dispute opened
+                              ▼
+                         NEEDS_REVIEW → re-adjudicate → { APPROVED | DENIED }
 ```
 
-**Locked state set (infographic 04):** `PENDING → { APPROVED | DENIED | NEEDS_REVIEW } → PAID`;
-a dispute reopens `DENIED → NEEDS_REVIEW`. `PARTIALLY_APPROVED` is **claim-level only**, never
-a line state. (These supersede the `SUBMITTED`/`ADJUDICATING`/line-level-`PARTIALLY_APPROVED`
-names sketched above.)
+**Locked state set:** line item `PENDING → { APPROVED | DENIED | NEEDS_REVIEW }`; a dispute
+reopens `DENIED → NEEDS_REVIEW`, which auto re-adjudicates back to `APPROVED | DENIED`.
+`PARTIALLY_APPROVED` is **claim-level only**, never a line state. **No `PAID` state in v1.**
 
-Prior-auth-missing is a clean `DENIED`, **not** `NEEDS_REVIEW` (decision #8, resolved);
-`NEEDS_REVIEW` is reached only via a dispute reopen and clears by auto re-adjudication. Full
-transition tables + guards are finalized with the C4 lifecycle work; illegal transitions must
-be rejected, not silently ignored.
+Prior-auth-missing is a clean `DENIED`, **not** `NEEDS_REVIEW` (decision #8); `NEEDS_REVIEW` is
+reached only via a dispute reopen and clears by auto re-adjudication. Transition *guards*
+(illegal-transition rejection) are finalized with the C4 lifecycle work; illegal transitions
+must be rejected, not silently ignored.
 
 ### Aggregation (line items → claim status)
 
@@ -168,7 +172,27 @@ be rejected, not silently ignored.
 | All fully approved | APPROVED |
 | Any partial, or mix of approved + denied | PARTIALLY_APPROVED |
 | Any disputed / re-adjudicating | UNDER_REVIEW |
-| All payable lines paid, none open | PAID |
+
+### Status-transition log (audit trail) — decision #15
+
+Every status change for a claim or line item is appended to one shared, append-only table —
+the member-facing lifecycle history.
+
+| column | meaning |
+|---|---|
+| `entity_type` | `CLAIM` \| `LINE_ITEM` |
+| `entity_id` | claim_id or line_item_id |
+| `from_status` / `to_status` | the move (`from` null on create) |
+| `actor` | `SYSTEM` \| `MEMBER` |
+| `reason` | coarse cause tag (`SUBMIT` \| `ADJUDICATED` \| `AGGREGATED` \| `DISPUTE_REOPEN`) — **not** a `ReasonCode` |
+| `seq` | injected logical clock — deterministic ordering |
+| `created_at` | wall-clock; **metadata only**, never read by logic/tests |
+
+One `setStatus()` helper writes the status column *and* appends the transition in the same
+transaction, so the log can never drift. Written at 4 sites: submit · each line adjudicated ·
+claim roll-up · dispute reopen. Surfaced as a `timeline` field on `GET /claims/:id` (no new
+endpoint). Append-only; never replayed to derive current status — status columns stay the
+source of truth (this is an audit log, not event sourcing).
 
 ## Reason codes
 

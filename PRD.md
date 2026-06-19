@@ -35,7 +35,7 @@ in the rule's unit) carry forward across claims within a plan year so limits exh
 1. Submit a claim with one or more line items (`POST /claims`).
 2. Adjudicate each line item against the member's active coverage rules, in a fixed order.
 3. Compute `payable_amount_cents` per line item (deductible, copay, coinsurance, limits, OOP max).
-4. Track claim and line-item lifecycle states with validated transitions.
+4. Track claim and line-item lifecycle states with validated transitions, appending every change to a status-transition log (the member-facing timeline). No `PAID` state in v1 — claims end at APPROVED / PARTIALLY_APPROVED / DENIED.
 5. Aggregate line-item outcomes into a claim-level status (incl. partial approval).
 6. Produce a per-decision explanation (reason code + human-readable text) and expose it (`GET /claims/:id/explanation`).
 7. Dispute a line-item decision, reopening it for re-adjudication while preserving the original (`POST /claims/:id/line-items/:lid/dispute`).
@@ -58,7 +58,7 @@ them will not improve the score.
 | Method & path | Purpose |
 |---|---|
 | `POST /claims` | Submit a claim with line items; runs adjudication; returns claim + per-line results. |
-| `GET /claims/:id` | Fetch a claim with its line items, statuses, and payable amounts. |
+| `GET /claims/:id` | Fetch a claim with its line items, statuses, payable amounts, and the status-transition `timeline`. |
 | `GET /claims/:id/explanation` | Return the full explanation: per line item, the reason code, the rule applied, and the numbers used. |
 | `POST /claims/:id/line-items/:lid/dispute` | Open a dispute on one line item; reopen for re-adjudication; preserve the prior decision. |
 
@@ -156,7 +156,7 @@ type LineItem = {
   billed_cents: number;         // positive integer
   units: number;                // default 1
   prior_auth_present: boolean;  // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
-  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW → PAID
+  status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW (no PAID in v1)
   fingerprint: string;          // member_id + service_code + service_date + billed_cents
 };
 ```
@@ -213,3 +213,5 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 15. **`units` per line defaults to 1.** Multi-unit lines are supported but seed data uses 1.
 16. **Intake reject = HTTP `4xx`, never persisted** (no `REJECTED` state). Member *existence* is an intake reject; policy *active-on-date* is an adjudication deny.
 17. **Adjudication outcomes are decisions, not errors.** Every denial (`NO_COVERAGE`, `EXCLUDED`, `PRIOR_AUTH_REQUIRED`, `LIMIT_EXCEEDED`, `POLICY_NOT_ACTIVE`, `DUPLICATE_LINE_ITEM`) returns HTTP `200` with a reason code + explanation. Only malformed/identity-failed input is HTTP `4xx`.
+18. **No `PAID` state / settle action in v1.** The payable *amount* (plan → member reimbursement) is computed and explained, but the `PAID` *state* and a settle endpoint are deferred to v2 — they need a payment trigger/gateway that is out of scope. `paid` is documented as a deferred transition (decision #14).
+19. **Status-transition audit log.** Every claim/line status change is appended to one shared, append-only table (`from`, `to`, `actor` ∈ {SYSTEM, MEMBER}, `reason`, `seq`), surfaced as a `timeline` on `GET /claims/:id`. Status columns stay the source of truth — not event-sourced (decision #15).

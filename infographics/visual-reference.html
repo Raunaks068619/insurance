@@ -582,19 +582,18 @@ plan         = allowed − member                    // computed last → shares
 <div class="figure">
 <div style="margin-bottom:20px">
 <div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:10px">Line-item lifecycle</div>
-<svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,sans-serif" font-size="13">
+<svg viewBox="0 0 660 175" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,sans-serif" font-size="13">
 <defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker></defs>
 <rect x="10" y="55" width="90" height="36" rx="8" fill="#f1f5f9" stroke="#64748b"/><text x="55" y="78" text-anchor="middle">PENDING</text>
 <rect x="200" y="10" width="100" height="36" rx="8" fill="#f0fdfa" stroke="#14b8a6"/><text x="250" y="33" text-anchor="middle" fill="#0f766e">APPROVED</text>
 <rect x="200" y="55" width="100" height="36" rx="8" fill="#fef2f2" stroke="#dc2626"/><text x="250" y="78" text-anchor="middle" fill="#b91c1c">DENIED</text>
-<rect x="200" y="100" width="120" height="36" rx="8" fill="#fffbeb" stroke="#f59e0b"/><text x="260" y="123" text-anchor="middle" fill="#b45309">NEEDS_REVIEW</text>
-<rect x="430" y="55" width="80" height="36" rx="8" fill="#eef2ff" stroke="#6366f1"/><text x="470" y="78" text-anchor="middle" fill="#4338ca">PAID</text>
+<rect x="200" y="105" width="120" height="36" rx="8" fill="#fffbeb" stroke="#f59e0b"/><text x="260" y="128" text-anchor="middle" fill="#b45309">NEEDS_REVIEW</text>
 <line x1="100" y1="68" x2="198" y2="33" stroke="#64748b" marker-end="url(#ah)"/>
 <line x1="100" y1="73" x2="198" y2="73" stroke="#64748b" marker-end="url(#ah)"/>
-<line x1="100" y1="78" x2="198" y2="113" stroke="#64748b" marker-end="url(#ah)"/>
-<line x1="300" y1="33" x2="428" y2="68" stroke="#64748b" marker-end="url(#ah)"/>
-<path d="M470,91 C470,140 560,140 560,73 L560,55" fill="none" stroke="#6366f1" stroke-dasharray="4 3" marker-end="url(#ah)"/>
-<text x="615" y="120" fill="#6366f1" font-size="12">dispute reopens</text>
+<line x1="100" y1="78" x2="198" y2="120" stroke="#64748b" marker-end="url(#ah)"/>
+<path d="M302,82 C382,96 382,123 322,124" fill="none" stroke="#6366f1" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+<path d="M320,110 C490,104 490,73 302,73" fill="none" stroke="#14b8a6" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+<text x="200" y="162" fill="#64748b" font-size="12">dispute reopens DENIED → NEEDS_REVIEW → auto re-adjudicate → APPROVED | DENIED</text>
 </svg>
 </div>
 <table>
@@ -604,7 +603,6 @@ plan         = allowed − member                    // computed last → shares
 <tr><td>every line APPROVED (full payable)</td><td style="color:var(--teal)">APPROVED</td></tr>
 <tr><td>mix of APPROVED + DENIED, or any dollar-straddle partial</td><td style="color:var(--amber)">PARTIALLY_APPROVED</td></tr>
 <tr><td>any line NEEDS_REVIEW / disputed re-adjudicating</td><td style="color:var(--amber)">UNDER_REVIEW</td></tr>
-<tr><td>every payable line PAID, none open</td><td style="color:var(--indigo)">PAID</td></tr>
 </tbody>
 </table>
 <div style="margin-top:16px;padding:14px;border-radius:8px;background:#eef2ff;border:1px solid var(--indigo);font-size:14px">
@@ -618,7 +616,7 @@ plan         = allowed − member                    // computed last → shares
 </ul></div>
 </section>
 
-<section><h2>10 · The build order — 27 test-first cycles</h2><p class="summary">The engine is test-driven one behavior per red→green cycle, in this order. Cycles <strong>1–25 are pure</strong> (a plain object, no DB); only 26–27 touch SQLite. This is the coding checklist.</p>
+<section><h2>10 · The build order — 31 test-first cycles</h2><p class="summary">The engine is test-driven one behavior per red→green cycle, in this order. Cycles <strong>1–25 are pure</strong> (a plain object, no DB); only 26–31 touch SQLite. This is the coding checklist.</p>
 <div class="figure">
 <div style="display:flex;flex-direction:column;gap:14px">
 
@@ -687,7 +685,17 @@ plan         = allowed − member                    // computed last → shares
 <div style="font-weight:700;color:var(--muted)">Writeback / integration · cycles 26–27 — SQLite</div>
 <ol start="26" style="margin:8px 0 0;padding-left:22px;font-size:14px">
 <li>full claim through the real store: accumulators persist, adjudications append-only, one txn</li>
-<li>dispute reopens a line, re-adjudicates, preserves the original immutably (last)</li>
+<li>dispute reopens a line, re-adjudicates, preserves the original immutably</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--indigo);background:#eef2ff;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#4338ca">Status-transition log · cycles 28–31 — SQLite</div>
+<ol start="28" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li><code>setStatus</code> appends one transition row {entity, from, to, actor, reason, seq}; from null on create</li>
+<li>full claim submit→adjudicate→aggregate logs the ordered transition set (correct seq order)</li>
+<li>re-run identical claim → identical transition rows except <code>created_at</code> (determinism)</li>
+<li>dispute reopen logs DENIED→NEEDS_REVIEW (MEMBER) then the auto re-adjudication; originals untouched</li>
 </ol>
 </div>
 
