@@ -112,5 +112,21 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     };
   }
 
-  throw new Error("adjudicateLine: cost-share math (copay/coinsurance) not yet implemented (TDD cycles 8+)");
+  // Cycle 8–9 — copay: a flat member charge that waives the deductible but counts to OOP.
+  // allowed == billed in v1; the member never owes more than the allowed amount (min clamp).
+  if (rule.costShare.type === "copay") {
+    const allowedCents = line.billedCents;
+    const memberCents = Math.min(rule.costShare.copayCents, allowedCents);
+    const planCents = allowedCents - memberCents;
+    return {
+      status: "APPROVED",
+      payableCents: planCents,
+      memberResponsibilityCents: memberCents,
+      reasons: [ReasonCode.APPROVED, ReasonCode.COPAY_APPLIED],
+      explanation: `Copay: you pay the ${formatUsd(memberCents)} copay; the plan pays ${formatUsd(planCents)}.`,
+      deltas: { deductibleIncCents: 0, oopIncCents: memberCents, limitInc: 0 },
+    };
+  }
+
+  throw new Error("adjudicateLine: coinsurance math not yet implemented (TDD cycles 10+)");
 }

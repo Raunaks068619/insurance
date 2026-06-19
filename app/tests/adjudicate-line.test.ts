@@ -135,3 +135,44 @@ describe("adjudicateLine — full coverage", () => {
     expect(result.explanation).toMatch(/\$?120(\.00)?/);
   });
 });
+
+describe("adjudicateLine — copay", () => {
+  it("charges the flat copay and pays the rest when the allowed amount exceeds the copay", () => {
+    // Arrange — $25 copay on a $180 office visit; copay waives the deductible.
+    const rule = aCoverageRule({
+      serviceCode: "OFFICE_VISIT",
+      costShare: { type: "copay", copayCents: 2_500 }, // $25.00
+      appliesDeductible: false,
+    });
+    const line = aLineItem({ serviceCode: "OFFICE_VISIT", billedCents: 18_000 }); // $180.00
+    const result = adjudicateLine(anAdjudicateInput({ line, rule }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(2_500); // member pays the copay
+    expect(result.payableCents).toBe(15_500); // plan pays the remainder
+
+    // Covered-line invariant: plan + member === billed.
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(line.billedCents);
+
+    // Copay waives the deductible but counts toward OOP.
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 2_500, limitInc: 0 });
+    expect(result.reasons).toEqual(["APPROVED", "COPAY_APPLIED"]);
+  });
+
+  it("caps the member charge at the allowed amount when the copay exceeds it (min clamp)", () => {
+    // Arrange — $50 copay but the service only costs $30; member can't owe more than billed.
+    const rule = aCoverageRule({
+      serviceCode: "OFFICE_VISIT",
+      costShare: { type: "copay", copayCents: 5_000 }, // $50.00
+      appliesDeductible: false,
+    });
+    const line = aLineItem({ serviceCode: "OFFICE_VISIT", billedCents: 3_000 }); // $30.00
+    const result = adjudicateLine(anAdjudicateInput({ line, rule }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(3_000); // clamped to billed
+    expect(result.payableCents).toBe(0); // plan pays nothing
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 3_000, limitInc: 0 });
+    expect(result.reasons).toEqual(["APPROVED", "COPAY_APPLIED"]);
+  });
+});
