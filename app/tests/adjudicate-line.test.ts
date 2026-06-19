@@ -250,3 +250,176 @@ describe("adjudicateLine — coinsurance", () => {
     expect(result.payableCents + result.memberResponsibilityCents).toBe(3_333); // no lost cent
   });
 });
+
+describe("adjudicateLine — visit limit", () => {
+  it("approves a visit and consumes one unit when the visit cap is not yet reached", () => {
+    // Arrange — PT, 20 visits/yr, $25 copay; 5 visits already used (15 remain).
+    const rule = aCoverageRule({
+      serviceCode: "PHYSICAL_THERAPY",
+      costShare: { type: "copay", copayCents: 2_500 },
+      appliesDeductible: false,
+      limit: { unit: "visits", count: 20 },
+    });
+    const line = aLineItem({ serviceCode: "PHYSICAL_THERAPY", billedCents: 15_000 }); // $150.00
+    const acc = anAccumulator({ limitUsed: 5 }); // 5 of 20 visits used
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(2_500); // the copay
+    expect(result.payableCents).toBe(12_500);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 2_500, limitInc: 1 }); // one visit consumed
+    expect(result.reasons).toEqual(["APPROVED", "COPAY_APPLIED"]);
+  });
+
+  it("denies the whole visit with LIMIT_EXCEEDED once the visit cap is reached", () => {
+    // Arrange — PT, 20 visits/yr; all 20 already used → no partial visit, clean denial.
+    const rule = aCoverageRule({
+      serviceCode: "PHYSICAL_THERAPY",
+      costShare: { type: "copay", copayCents: 2_500 },
+      appliesDeductible: false,
+      limit: { unit: "visits", count: 20 },
+    });
+    const line = aLineItem({ serviceCode: "PHYSICAL_THERAPY", billedCents: 15_000 });
+    const acc = anAccumulator({ limitUsed: 20 }); // cap reached
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0);
+    expect(result.memberResponsibilityCents).toBe(0);
+    expect(result.reasons).toEqual(["LIMIT_EXCEEDED"]);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+  });
+});
+
+describe("adjudicateLine — dollar limit", () => {
+  it("approves within the dollar cap and accrues the plan pay toward the limit", () => {
+    // Arrange — chiro, $1,500/yr cap, $25 copay; nothing used yet.
+    const rule = aCoverageRule({
+      serviceCode: "CHIROPRACTIC",
+      costShare: { type: "copay", copayCents: 2_500 },
+      appliesDeductible: false,
+      limit: { unit: "dollars", amountCents: 150_000 }, // $1,500.00/yr
+    });
+    const line = aLineItem({ serviceCode: "CHIROPRACTIC", billedCents: 40_000 }); // $400.00
+    const acc = anAccumulator({ limitUsed: 0 });
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(2_500); // copay
+    expect(result.payableCents).toBe(37_500); // plan pays the rest
+    // The dollar limit accrues the PLAN PAY (not billed, not the copay).
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 2_500, limitInc: 37_500 });
+    expect(result.reasons).toEqual(["APPROVED", "COPAY_APPLIED"]);
+  });
+
+  it("straddles the dollar cap: plan caps at the remaining, the shortfall falls to the member, line stays APPROVED", () => {
+    // Arrange — chiro, $1,500/yr cap, $1,400 already used ($100 remains). A full-coverage
+    // $300 service: the plan would pay $300 but only $100 of the cap is left.
+    const rule = aCoverageRule({
+      serviceCode: "CHIROPRACTIC",
+      costShare: { type: "full_coverage" },
+      appliesDeductible: false,
+      limit: { unit: "dollars", amountCents: 150_000 }, // $1,500.00/yr
+    });
+    const line = aLineItem({ serviceCode: "CHIROPRACTIC", billedCents: 30_000 }); // $300.00
+    const acc = anAccumulator({ limitUsed: 140_000 }); // $1,400 used → $100 remains
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED"); // a straddle is NOT a denial
+    expect(result.payableCents).toBe(10_000); // plan capped at the remaining $100
+    expect(result.memberResponsibilityCents).toBe(20_000); // the over-limit $200 shortfall
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(line.billedCents); // invariant holds
+    // The cap is exhausted; over-limit shortfall does NOT accrue to OOP.
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 10_000 });
+    expect(result.reasons).toEqual(["APPROVED", "LIMIT_EXCEEDED"]);
+  });
+});
+
+describe("adjudicateLine — OOP maximum", () => {
+  it("caps the member at the OOP max and refunds the excess to the plan", () => {
+    // Arrange — OOP max $3,000, already $2,900 met → only $100 of room left.
+    const rule = aCoverageRule({
+      serviceCode: "HOSPITAL",
+      costShare: { type: "coinsurance", rate: 0.5 }, // member 50%
+      appliesDeductible: false,
+    });
+    const line = aLineItem({ serviceCode: "HOSPITAL", billedCents: 60_000 }); // $600.00
+    const acc = anAccumulator({ oopMetCents: 290_000 }); // $2,900 of $3,000 used
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    // 50% of $600 = $300, but only $100 of room remains → member pays $100, plan eats $500.
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(10_000); // capped at the $100 of room
+    expect(result.payableCents).toBe(50_000); // plan's $300 + the $200 refunded excess
+    expect(result.payableCents + result.memberResponsibilityCents).toBe(line.billedCents);
+    expect(result.deltas.oopIncCents).toBe(10_000); // OOP filled exactly to the max
+    expect(result.reasons).toEqual(["APPROVED", "COINSURANCE_APPLIED", "OOP_MAX_REACHED"]);
+  });
+
+  it("pays the line 100% with the member owing nothing once the OOP max is already met", () => {
+    // Arrange — OOP max $3,000, already fully met. The member is done paying for the year.
+    const rule = aCoverageRule({
+      serviceCode: "HOSPITAL",
+      costShare: { type: "coinsurance", rate: 0.5 },
+      appliesDeductible: false,
+    });
+    const line = aLineItem({ serviceCode: "HOSPITAL", billedCents: 60_000 });
+    const acc = anAccumulator({ oopMetCents: 300_000 }); // OOP max reached
+    const result = adjudicateLine(anAdjudicateInput({ line, rule, acc }));
+
+    expect(result.status).toBe("APPROVED");
+    expect(result.memberResponsibilityCents).toBe(0); // member owes nothing more
+    expect(result.payableCents).toBe(60_000); // plan pays 100%
+    expect(result.deltas.oopIncCents).toBe(0); // nothing more can accrue
+    expect(result.reasons).toEqual(["APPROVED", "COINSURANCE_APPLIED", "OOP_MAX_REACHED"]);
+  });
+});
+
+describe("adjudicateLine — cross-line determinism", () => {
+  it("line 2 sees line 1's deductible draw when the caller applies deltas between lines", () => {
+    // Two coinsurance lines on one claim. The caller (the claim loop, cycles 22–25) applies
+    // each line's deltas to the accumulator BEFORE adjudicating the next. Deductible $500, 20%.
+    const rule = aCoverageRule({
+      serviceCode: "SURGERY",
+      costShare: { type: "coinsurance", rate: 0.2 },
+      appliesDeductible: true,
+    });
+    const accStart = anAccumulator({ deductibleMetCents: 0, oopMetCents: 0 });
+
+    // Line 1 — $300, fully absorbed by the fresh $500 deductible.
+    const line1 = aLineItem({ serviceCode: "SURGERY", billedCents: 30_000 });
+    const r1 = adjudicateLine(anAdjudicateInput({ line: line1, rule, acc: accStart }));
+    expect(r1.deltas.deductibleIncCents).toBe(30_000); // all to deductible
+
+    // Caller advances the accumulator with line 1's deltas.
+    const accAfter1 = anAccumulator({
+      deductibleMetCents: accStart.deductibleMetCents + r1.deltas.deductibleIncCents, // 30_000
+      oopMetCents: accStart.oopMetCents + r1.deltas.oopIncCents,
+    });
+
+    // Line 2 — $400. Only $200 of the deductible remains → it draws $200, not a fresh $400.
+    const line2 = aLineItem({ serviceCode: "SURGERY", billedCents: 40_000 });
+    const r2 = adjudicateLine(anAdjudicateInput({ line: line2, rule, acc: accAfter1 }));
+
+    expect(r2.deltas.deductibleIncCents).toBe(20_000); // proves it saw line 1's advance
+    expect(r2.memberResponsibilityCents).toBe(24_000); // $200 deductible + 20% of the other $200
+    expect(r2.payableCents).toBe(16_000);
+  });
+
+  it("re-running the same line against the same snapshot yields identical results", () => {
+    const rule = aCoverageRule({
+      serviceCode: "MRI",
+      costShare: { type: "coinsurance", rate: 0.2 },
+      appliesDeductible: true,
+    });
+    const line = aLineItem({ serviceCode: "MRI", billedCents: 3_333 }); // odd-cent line
+    const acc = anAccumulator({ deductibleMetCents: 20_000 });
+    const input = anAdjudicateInput({ line, rule, acc });
+
+    const first = adjudicateLine(input);
+    const second = adjudicateLine(input);
+
+    // Pure function: no clock, no RNG, no float drift, no mutation of the input snapshot.
+    expect(second).toEqual(first);
+  });
+});

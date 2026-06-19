@@ -98,11 +98,30 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     );
   }
 
-  // Cycle 1 — the full-coverage happy path: plan pays 100%, member owes nothing,
-  // deductible/OOP/limit untouched. Cost-share math (copay, coinsurance, limits,
-  // OOP) arrives in later cycles, each driven by its own failing test.
+  // Cycle 15 — visit limit fully consumed → whole-visit denial (no partial visit).
+  if (rule.limit.unit === "visits" && acc.limitUsed >= rule.limit.count) {
+    return deny(
+      ReasonCode.LIMIT_EXCEEDED,
+      `Limit exceeded: ${line.serviceCode} has used all ${rule.limit.count} covered visits this plan year; the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Dollar limit fully exhausted (no remaining at all) → denial. A *partial* remaining is
+  // handled after cost-share as a straddle (cycle 17), where the line stays APPROVED.
+  if (rule.limit.unit === "dollars" && acc.limitUsed >= rule.limit.amountCents) {
+    return deny(
+      ReasonCode.LIMIT_EXCEEDED,
+      `Limit exceeded: ${line.serviceCode} has reached its ${formatUsd(rule.limit.amountCents)} annual limit; the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // ---- Cost-share (step 7): compute the base member / plan split. Every covered line
+  // satisfies `payable + member === billed`. The limit step below may then shift money. ----
+  let result: AdjudicateLineResult;
+
   if (rule.costShare.type === "full_coverage") {
-    return {
+    // Cycle 1 — plan pays 100%, member owes nothing, deductible/OOP untouched.
+    result = {
       status: "APPROVED",
       payableCents: line.billedCents,
       memberResponsibilityCents: 0,
@@ -110,15 +129,12 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
       explanation: `Full coverage: the plan pays 100% (${formatUsd(line.billedCents)}); you owe ${formatUsd(0)}.`,
       deltas: { deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 },
     };
-  }
-
-  // Cycle 8–9 — copay: a flat member charge that waives the deductible but counts to OOP.
-  // allowed == billed in v1; the member never owes more than the allowed amount (min clamp).
-  if (rule.costShare.type === "copay") {
+  } else if (rule.costShare.type === "copay") {
+    // Cycle 8–9 — flat copay; waives the deductible but counts to OOP; member ≤ allowed.
     const allowedCents = line.billedCents;
     const memberCents = Math.min(rule.costShare.copayCents, allowedCents);
     const planCents = allowedCents - memberCents;
-    return {
+    result = {
       status: "APPROVED",
       payableCents: planCents,
       memberResponsibilityCents: memberCents,
@@ -126,12 +142,10 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
       explanation: `Copay: you pay the ${formatUsd(memberCents)} copay; the plan pays ${formatUsd(planCents)}.`,
       deltas: { deductibleIncCents: 0, oopIncCents: memberCents, limitInc: 0 },
     };
-  }
-
-  // Cycle 10–13 — coinsurance: the deductible draws first (when applies_deductible), then the
-  // member pays `rate` of the remainder. Rounding lives only on the coinsurance share; `plan`
-  // is computed last as `allowed − member`, so the shares always sum to allowed (no lost cent).
-  if (rule.costShare.type === "coinsurance") {
+  } else {
+    // Cycle 10–13 — coinsurance: the deductible draws first (when applies_deductible), then the
+    // member pays `rate` of the remainder. Rounding lives only on the coinsurance share; `plan`
+    // is computed last as `allowed − member`, so the shares always sum to allowed (no lost cent).
     const allowedCents = line.billedCents;
     const remainingDeductibleCents = Math.max(0, policy.deductibleCents - acc.deductibleMetCents);
     const dedPortionCents = rule.appliesDeductible
@@ -148,7 +162,7 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
 
     const ratePct = Math.round(rule.costShare.rate * 100);
     const dedNote = dedPortionCents > 0 ? `${formatUsd(dedPortionCents)} toward your deductible plus ` : "";
-    return {
+    result = {
       status: "APPROVED",
       payableCents: planCents,
       memberResponsibilityCents: memberCents,
@@ -158,5 +172,43 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     };
   }
 
-  throw new Error("adjudicateLine: unreachable — unhandled cost-share type");
+  // ---- Limit application (steps 5b/7b/9): the gates above already denied a fully-exhausted
+  // limit, so here there is room. A visit consumes one unit; a dollar limit accrues the plan
+  // pay and may straddle the cap (cap plan at the remaining, shift the shortfall to member). ----
+  if (rule.limit.unit === "visits") {
+    // Cycle 14 — a covered visit consumes one unit of the visit allowance.
+    result.deltas.limitInc = 1;
+  } else if (rule.limit.unit === "dollars") {
+    const remainingCents = rule.limit.amountCents - acc.limitUsed;
+    if (result.payableCents > remainingCents) {
+      // Cycle 17 — straddle: the plan pay crosses the remaining dollar cap. Cap the plan at
+      // the remaining, push the shortfall to the member, note LIMIT_EXCEEDED; line stays
+      // APPROVED. The over-limit shortfall is the member's own cost — it does not accrue to OOP.
+      const shortfallCents = result.payableCents - remainingCents;
+      result.payableCents = remainingCents;
+      result.memberResponsibilityCents += shortfallCents;
+      result.reasons = [...result.reasons, ReasonCode.LIMIT_EXCEEDED];
+      result.deltas.limitInc = remainingCents;
+      result.explanation += ` The ${formatUsd(rule.limit.amountCents)} annual limit is reached; ${formatUsd(shortfallCents)} is your responsibility.`;
+    } else {
+      // Cycle 16 — within the remaining dollar cap: the plan pay accrues to the limit.
+      result.deltas.limitInc = result.payableCents;
+    }
+  }
+
+  // ---- OOP cap (step 8): the member never pays past the out-of-pocket maximum. If this
+  // line's OOP-accruing share would cross the cap, refund the excess to the plan and fill the
+  // OOP exactly to the max. The over-limit straddle shortfall is not OOP-eligible, so it is
+  // never in deltas.oopIncCents and is correctly left out of this check. ----
+  const oopRoomCents = policy.oopMaxCents - acc.oopMetCents;
+  if (result.deltas.oopIncCents > oopRoomCents) {
+    const excessCents = result.deltas.oopIncCents - oopRoomCents;
+    result.memberResponsibilityCents -= excessCents; // member pays only up to the cap
+    result.payableCents += excessCents; // the plan absorbs the rest
+    result.deltas.oopIncCents = oopRoomCents; // OOP fills exactly to the max
+    result.reasons = [...result.reasons, ReasonCode.OOP_MAX_REACHED];
+    result.explanation += ` Your out-of-pocket maximum is reached, so the plan covers the remaining ${formatUsd(excessCents)}.`;
+  }
+
+  return result;
 }
