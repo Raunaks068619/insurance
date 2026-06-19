@@ -36,6 +36,19 @@ export type AdjudicateLineResult = {
 export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult {
   const { rule, line } = input;
 
+  // Cycle 2 — gate: no rule matched this service_code → NO_COVERAGE. Plan pays
+  // nothing, no accumulator is touched. A denial is a processed decision, not an error.
+  if (!rule) {
+    return {
+      status: "DENIED",
+      payableCents: 0,
+      memberResponsibilityCents: 0,
+      reasons: [ReasonCode.NO_COVERAGE],
+      explanation: `No coverage: no benefit rule applies to ${line.serviceCode}, so the plan pays ${formatUsd(0)}.`,
+      deltas: { deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 },
+    };
+  }
+
   // Cycle 1 — the full-coverage happy path: plan pays 100%, member owes nothing,
   // deductible/OOP/limit untouched. Every other branch (gates, copay, coinsurance,
   // limits, OOP) arrives in a later cycle, each driven by its own failing test.
