@@ -25,9 +25,11 @@ or `visits`; the cost-share step is a switch on the mechanism (copay services wa
 deductible, coinsurance services apply it first). The claim's overall status is derived by
 aggregating its line items; every decision is explained by a stable reason code plus a
 sentence citing the rule and the numbers used; the same claim submitted against the same
-accumulator state always yields the same result; and a member can dispute any line item,
-which reopens it for re-adjudication while preserving the original decision as an immutable
-record. Persisted accumulators (deductible met, out-of-pocket met, per-service limit used —
+accumulator state always yields the same result; and a member can dispute **any terminal line
+item** — supplying corrected facts (e.g. a prior-auth number) — which re-adjudicates the line
+against current rules, preserves the original decision immutably, and resolves to a visible
+outcome (`UPHELD` / `OVERTURNED` / `PARTIALLY_OVERTURNED` / `MODIFIED`). Persisted accumulators
+(deductible met, out-of-pocket met, per-service limit used —
 in the rule's unit) carry forward across claims within a plan year so limits exhaust correctly.
 
 ## In scope (7)
@@ -38,7 +40,7 @@ in the rule's unit) carry forward across claims within a plan year so limits exh
 4. Track claim and line-item lifecycle states with validated transitions, appending every change to a status-transition log (the member-facing timeline). No `PAID` state in v1 — claims end at APPROVED / PARTIALLY_APPROVED / DENIED.
 5. Aggregate line-item outcomes into a claim-level status (incl. partial approval).
 6. Produce a per-decision explanation (reason code + human-readable text) and expose it (`GET /claims/:id/explanation`).
-7. Dispute a line-item decision, reopening it for re-adjudication while preserving the original (`POST /claims/:id/line-items/:lid/dispute`).
+7. Dispute a *terminal* line-item decision with optional corrected facts, re-adjudicating it (single-line, accumulator net-out) while preserving the original immutably and resolving to a 4-value outcome (`POST /claims/:id/line-items/:lid/dispute`). (decision #16)
 
 ## Out of scope (verbatim from the assignment)
 
@@ -60,7 +62,7 @@ them will not improve the score.
 | `POST /claims` | Submit a claim with line items; runs adjudication; returns claim + per-line results. |
 | `GET /claims/:id` | Fetch a claim with its line items, statuses, payable amounts, and the status-transition `timeline`. |
 | `GET /claims/:id/explanation` | Return the full explanation: per line item, the reason code, the rule applied, and the numbers used. |
-| `POST /claims/:id/line-items/:lid/dispute` | Open a dispute on one line item; reopen for re-adjudication; preserve the prior decision. |
+| `POST /claims/:id/line-items/:lid/dispute` | Open a dispute on one terminal line item with optional `corrected` facts; re-adjudicate (single-line net-out, current rules); preserve the prior decision immutably; return the new decision + outcome. |
 
 The API exists to demonstrate the domain, not as a product surface. No auth, no CRUD
 beyond these four routes. Seed data (members, policies, coverage rules, accumulators) is
@@ -189,7 +191,7 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 | Domain decomposition | Explicit entities (Member, Policy, CoverageRule, Claim, LineItem, Adjudication, Accumulator, Dispute) with clear relationships in `docs/domain-model.md`. |
 | Rule representation | Coverage rules are typed config data — a discriminated cost-share union and unit-typed limits — applied by a fixed-order, mechanism-aware adjudicator; not hardcoded branches, not a DSL. Grounded in research across UnitedHealthcare, Aetna, Cigna, BCBS, and ACA structure. |
 | State management | Two explicit state machines (claim, line item) with validated transitions and derived claim status. |
-| Edge-case thinking | Partial approval, limit straddling, duplicate line items, dispute reopen, out-of-period policy, integer-cents money — each covered by a named test. |
+| Edge-case thinking | Partial approval, limit straddling, duplicate line items, dispute re-adjudication (corrected facts, accumulator net-out, 4-value outcome), out-of-period policy, integer-cents money — each covered by a named test. |
 | Explanation capability | Every decision carries a stable reason code and a sentence citing the rule and numbers; exposed via `/explanation`. |
 | Test-first git history | Red→green commit pairs; tests encode domain rules, not HTTP status codes. |
 | Honest self-review | `docs/self-review.md` is a calibrated gap-list. |
@@ -202,7 +204,7 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 4. **Allowed amount == billed amount.** No fee schedule / provider-negotiated rate lookup; the billed amount is treated as the allowed amount. A real system would apply a fee schedule first.
 5. **Plan year is a fixed calendar window on the policy.** Accumulator periods align to the policy's plan-year boundaries, not a rolling window.
 6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. `prior_auth_present` defaults to `true` (absence = auth present); if a rule requires it and the line is explicitly `false`, the line is a clean `DENIED` with `PRIOR_AUTH_REQUIRED`, payable 0.
-7. **Disputes are member-initiated and immediately re-adjudicated** under current rules/accumulators; no human-reviewer queue. The original decision is preserved immutably.
+7. **Disputes are first-class and member-initiated** (decision #16): disputable from any *terminal* line, carrying optional corrected facts (`prior_auth_present`/`service_code`/`billed_cents`/`units`); re-adjudicated synchronously against current rules and `current accumulator − this line's own original deltas` (single-line net-out; no cross-claim cascade); the original decision is preserved immutably; the dispute resolves to `UPHELD | OVERTURNED | PARTIALLY_OVERTURNED | MODIFIED`. No human-reviewer queue; `DISPUTED_OVERRIDE` reserved for v2.
 8. **Determinism over wall-clock.** Adjudication reads a snapshot of accumulators; concurrency control beyond SQLite's single-writer model is out of scope and noted.
 9. **One cost-share mechanism per service.** Each rule is `full_coverage`, `copay`, or `coinsurance` — not a stack. The real copay-then-coinsurance case (ER, some urgent care) is approximated by its dominant component and documented as a known simplification.
 10. **Limits are unit-typed (`dollars` or `visits`).** Visit/day caps are the most common real limit; the dollars case satisfies the brief's "$Y per year" example. Replacement-frequency and supply-window limits (DME, drug 30/90-day) are out of scope.

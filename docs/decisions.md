@@ -182,6 +182,41 @@ the log is a parallel audit trail. `actor` is a `SYSTEM | MEMBER` enum (no auth/
 never read by logic/tests. Cost: a small write at each transition; adds TDD cycles 28–31.
 **Reversible?:** Yes — additive; the table can be dropped without touching adjudication.
 
+### 16 — Dispute is a first-class flow (Q4 resolved)
+
+**Chose:** A dispute is a member-initiated, **synchronous re-adjudication** of one line item that
+carries **corrected facts**, preserves the original decision immutably, and resolves to a
+**4-value outcome**.
+- **Trigger — corrected facts, not a pure re-run.** The dispute body is `{ reason, corrected? }`
+  where `corrected` may amend only `{ prior_auth_present, service_code, billed_cents, units }`. A
+  deterministic engine re-running identical inputs is a no-op; a meaningful flip needs a changed
+  input. Re-adjudication binds to **current** coverage rules, so a retroactive rule change also
+  flips an outcome for free. No corrected facts → an honest `UPHELD`.
+- **Disputable from any terminal line** (`APPROVED` / partial / `DENIED`), not denial-only — real
+  members dispute underpayments and miscomputed cost-share, not just outright denials.
+- **Single-line scope with accumulator net-out.** Re-adjudicate only the disputed line against
+  `current accumulator − that line's original deltas`, then apply the new deltas. Invariant: each
+  accumulator dimension = Σ of every line's *latest* adjudication deltas. Sibling / cross-claim
+  lines are **not** cascaded.
+- **4-value outcome** `UPHELD | OVERTURNED | PARTIALLY_OVERTURNED | MODIFIED`, computed by diffing
+  the new vs original adjudication (status / payable / reasons). Line transitions
+  `{APPROVED|DENIED} → NEEDS_REVIEW → {APPROVED|DENIED}`; claim `terminal → UNDER_REVIEW →
+  terminal`; dispute `OPEN → RESOLVED`.
+
+**Over:** (a) a pure no-op re-run (theatre — never flips); (b) a human reviewer queue /
+discretionary `DISPUTED_OVERRIDE` (no reviewer actor in v1 scope); (c) blind delta-reversal on
+re-adjudication (corrupts shared accumulators — double-counts the deductible or drives OOP negative
+once later claims have advanced them); (d) whole-claim re-adjudication (re-touches undisputed lines,
+bloats append-only history).
+**Trade-off:** Corrected-facts re-adjudication reuses the entire deterministic engine unchanged and
+demonstrates the most common real dispute (a supplied prior-auth number flips `PRIOR_AUTH_REQUIRED`
+→ `APPROVED`; OIG found MA plans overturn ~75% of appealed denials, mostly on corrected info). Cost:
+single-line scope means an intervening line decided against the pre-dispute accumulator is **not**
+recomputed — a documented v1 limitation, not a cross-claim recompute engine. `DISPUTED_OVERRIDE`
+stays in the enum as the v2 reviewer-override slot.
+**Reversible?:** Yes — `corrected{}` is additive; a reviewer/override path and whole-claim cascade
+can layer on later.
+
 ---
 
 ## Decisions resolved this framing session
@@ -192,11 +227,13 @@ never read by logic/tests. Cost: a small write at each transition; adds TDD cycl
 
 ## Decisions still open (resolve and move up)
 
-- **Dispute resolution (Q4)** — auto re-adjudicate vs. reviewer queue (leaning auto, immutable
-  original). C6 — does not block core adjudication TDD (cycles 1–25); confirm before cycle 27.
+- _None._ All framing/design questions resolved; ready to test-drive.
 
 ## Decisions resolved (moved up)
 
+- **Dispute resolution (Q4)** — RESOLVED: first-class corrected-facts re-adjudication, disputable
+  from any terminal line, single-line net-out accumulators, 4-value outcome, no reviewer queue.
+  See decision #16.
 - **Duplicate handling (Q5)** — RESOLVED: fingerprint computed at intake; soft `DUPLICATE_LINE_ITEM` decided at adjudication. See decision #11 / TRACK #12.
 - **C3 adjudication behavior** — RESOLVED (this session): full pipeline, cost-share math,
   determinism, accumulator writeback, and the TDD build order are planned in
@@ -218,5 +255,8 @@ never read by logic/tests. Cost: a small write at each transition; adds TDD cycl
 10. Adjudication denials are decisions (HTTP 200 + reason + explanation); only malformed/identity input is HTTP 4xx.
 11. No `PAID` state / settle in v1; `paid` is a deferred v2 transition (decision #14).
 12. Every status change is recorded in an append-only status-transition log, not event-sourced (decision #15).
+13. A dispute carries corrected facts (`prior_auth_present`/`service_code`/`billed_cents`/`units`) and re-adjudicates against current rules; absent corrections → `UPHELD` (decision #16).
+14. Dispute re-adjudication is single-line and nets out the line's own prior deltas; intervening sibling / cross-claim lines are not cascaded (decision #16).
+15. No human reviewer queue; `DISPUTED_OVERRIDE` is reserved for a v2 reviewer-override path (decision #16).
 
 _Add to this list whenever the build forces a judgment call the assignment left open._

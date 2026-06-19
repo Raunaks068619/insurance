@@ -20,7 +20,7 @@ of them is a bug — reconcile and log the decision in `TRACK.md`.
 | **LineItem** | One service on a claim; the unit of adjudication. | `id`, `claim_id`, `service_code`, `billed_cents`, `units`, `prior_auth_present`, `status`, `fingerprint` |
 | **Adjudication** | The immutable decision for a line item. | `line_item_id`, `status`, `payable_cents`, `member_responsibility_cents`, `reasons` (ReasonCode[]), `explanation`, `created_at` |
 | **Accumulator** | Persisted running totals per member per plan year. | `member_id`, `plan_year`, `deductible_met_cents`, `oop_met_cents`, `limit_used` per `service_code` (interpreted in the rule's limit unit — cents for `dollars`, a visit count for `visits`) |
-| **Dispute** | A member challenge to a line-item decision. | `id`, `line_item_id`, `original_adjudication_id`, `reason`, `opened_at`, `resolved_at`, `outcome` |
+| **Dispute** | A member challenge to a *terminal* line-item decision; synchronous re-adjudication of corrected facts. | `id`, `line_item_id`, `original_adjudication_id`, `resolved_adjudication_id`, `reason`, `corrected?` (`prior_auth_present?`/`service_code?`/`billed_cents?`/`units?`), `state` (`OPEN`\|`RESOLVED`), `outcome` (`UPHELD`\|`OVERTURNED`\|`PARTIALLY_OVERTURNED`\|`MODIFIED`), `opened_at`, `resolved_at` |
 
 Relationships: Member 1—1 Policy (per plan year); Policy 1—N CoverageRule; Member 1—N
 Claim; Claim 1—N LineItem; LineItem 1—N Adjudication (history; latest is current);
@@ -60,7 +60,7 @@ export enum ReasonCode {
   PRIOR_AUTH_REQUIRED = "PRIOR_AUTH_REQUIRED", // rule requires prior auth, none present
   DUPLICATE_LINE_ITEM = "DUPLICATE_LINE_ITEM", // same fingerprint already adjudicated
   POLICY_NOT_ACTIVE = "POLICY_NOT_ACTIVE",     // service date outside policy active window
-  DISPUTED_OVERRIDE = "DISPUTED_OVERRIDE",     // decision changed via dispute resolution
+  DISPUTED_OVERRIDE = "DISPUTED_OVERRIDE",     // RESERVED for a v2 reviewer override; UNUSED in v1 (overturns carry the re-derived codes)
 }
 ```
 
@@ -71,9 +71,9 @@ carries the breakdown.
 
 ## Canonical adjudication order (mechanism-aware)
 
-> ⚠️ **C3 adjudication behavior is being finalized — treat this section as PROVISIONAL.**
-> In particular, prior-auth-missing may route to `NEEDS_REVIEW` (not a clean denial — see
-> below), and `reasons` is an array. The artifact *shapes* are locked; the *flow* is not.
+> ✅ **C3 adjudication behavior is LOCKED** (see `docs/adjudication-plan.md`). Prior-auth-missing
+> is a **clean `DENIED`** (`PRIOR_AUTH_REQUIRED`, payable 0 — decision #8), **not** `NEEDS_REVIEW`;
+> `reasons` is an array (dominant code first). `NEEDS_REVIEW` is reached only via a dispute.
 
 Apply per line item, in this exact order. Short-circuit denials return immediately. The
 cost-share step is a **switch on `cost_share.type`**, not a fixed deductible→copay→coinsurance
@@ -82,7 +82,7 @@ sequence — a service is covered by exactly one mechanism.
 1. **Policy active?** Service date within `[effective_date, termination_date]`. Else → `POLICY_NOT_ACTIVE`, payable 0.
 2. **Rule exists?** A CoverageRule for `service_code` exists. Else → `NO_COVERAGE`, payable 0.
 3. **Covered & not excluded?** `excluded == true` → `EXCLUDED`; `covered == false` → `NO_COVERAGE`. Payable 0.
-4. **Prior auth satisfied?** If `requires_prior_auth` and not `prior_auth_present` → `PRIOR_AUTH_REQUIRED`. *(Provisional: the line likely goes to `NEEDS_REVIEW` rather than a clean `DENIED`/payable 0 — confirmed in the C3 brainstorm.)*
+4. **Prior auth satisfied?** If `requires_prior_auth` and not `prior_auth_present` → `PRIOR_AUTH_REQUIRED`, payable 0 — a **clean `DENIED`** (decision #8), not `NEEDS_REVIEW`.
 5. **Limit remaining?** Read `limit_used` for the service_code:
    - `unit: none` → skip.
    - `unit: visits` → if `used_count >= count` → `LIMIT_EXCEEDED`, payable 0 (whole-visit unit; no straddle).
@@ -115,41 +115,37 @@ same starting accumulators yields identical results.
             └──────┬───────┘
         ┌──────────┼───────────┐
         ▼          ▼           ▼
-   ┌─────────┐ ┌────────────────┐ ┌────────┐
-   │ APPROVED│ │PARTIALLY_APPROVED│ │ DENIED │
-   └────┬────┘ └───────┬────────┘ └───┬────┘
-        └──────────────┼──────────────┘
-                       │ all payable lines settled
-                       ▼
-                  ┌─────────┐
-                  │  PAID   │
-                  └─────────┘
-   (any state with an open dispute → re-enters UNDER_REVIEW)
+   ┌─────────┐ ┌──────────────────┐ ┌────────┐
+   │ APPROVED│ │ PARTIALLY_APPROVED│ │ DENIED │   ← terminal in v1 (no PAID — decision #14)
+   └─────────┘ └──────────────────┘ └────────┘
+   (dispute opened on any terminal line → re-enters UNDER_REVIEW → re-adjudicate → terminal)
 ```
 
 ### Line item
 
 ```
-   SUBMITTED → ADJUDICATING → { APPROVED | PARTIALLY_APPROVED | DENIED }
-                                        │
-                                  dispute opened
-                                        ▼
-                                   DISPUTED → re-adjudicate → { APPROVED | PARTIALLY_APPROVED | DENIED }
-   APPROVED / PARTIALLY_APPROVED → PAID
+   PENDING → ADJUDICATING → { APPROVED | DENIED }
+                                  │
+                       dispute opened (ANY terminal line)
+                                  ▼
+                             NEEDS_REVIEW → re-adjudicate → { APPROVED | DENIED }
 ```
 
-**Locked state set (infographic 04):** `PENDING → { APPROVED | DENIED | NEEDS_REVIEW } → PAID`;
-a dispute reopens `DENIED → NEEDS_REVIEW`. `PARTIALLY_APPROVED` is **claim-level only**. The
-names in the diagram above (`SUBMITTED`/`ADJUDICATING`/line-level `PARTIALLY_APPROVED`) are
-superseded by these; the routing into `NEEDS_REVIEW` is provisional C3 work.
+**Locked state set:** line item `PENDING → { APPROVED | DENIED | NEEDS_REVIEW }`. A dispute reopens
+**any terminal line** (`APPROVED` or `DENIED`) → `NEEDS_REVIEW`, which auto re-adjudicates back to
+`APPROVED | DENIED` (decision #16 — members dispute underpayments, not only denials).
+`PARTIALLY_APPROVED` is **claim-level only**, never a line state. `NEEDS_REVIEW` is reached *only*
+via a dispute (prior-auth-missing is a clean `DENIED`, decision #15) and clears immediately by auto
+re-adjudication. **No `PAID` line state in v1** (decision #14). The older diagram names
+(`SUBMITTED`/`ADJUDICATING`/`DISPUTED`/line-level `PARTIALLY_APPROVED`/`PAID`) are superseded.
 
 ### Aggregation logic (line items → claim)
 
 - All line items `DENIED` → claim `DENIED`.
 - All line items `APPROVED` (full payable, nothing denied) → claim `APPROVED`.
-- Mix of approved/partial and denied, or any `PARTIALLY_APPROVED` line → claim `PARTIALLY_APPROVED`.
-- Any line item `DISPUTED`/re-adjudicating → claim `UNDER_REVIEW`.
-- Claim `PAID` only when every payable line item is `PAID` and none are open/disputed.
+- Mix of `APPROVED` + `DENIED`, or any straddled-partial `APPROVED` line → claim `PARTIALLY_APPROVED`.
+- Any line item `NEEDS_REVIEW` (disputed / re-adjudicating) → claim `UNDER_REVIEW`.
+- **No `PAID` state in v1** (decision #14) — claims terminate at `APPROVED` / `PARTIALLY_APPROVED` / `DENIED`.
 
 ## Edge cases to test
 
@@ -161,7 +157,7 @@ superseded by these; the routing into `NEEDS_REVIEW` is provisional C3 work.
 | **Full coverage (preventive)** | A `full_coverage` rule (e.g. annual physical) → plan pays 100%, member 0, deductible untouched. |
 | **Copay waives deductible** | A `copay` service → member pays only the copay even with an unmet deductible; the copay still accrues to OOP. |
 | **Duplicate line item** | Same fingerprint (member + service_code + service_date + billed) already adjudicated → `DUPLICATE_LINE_ITEM`, payable 0, original untouched. |
-| **Dispute reopens** | Disputing a line item creates a Dispute, sets line `DISPUTED`, re-adjudicates, and preserves the original Adjudication immutably. |
+| **Dispute (first-class)** | Disputing any *terminal* line creates a Dispute carrying `corrected?` facts, sets line `NEEDS_REVIEW`, re-adjudicates against current rules + `current accumulator − this line's original deltas`, appends a new Adjudication (original immutable), and resolves to `UPHELD`/`OVERTURNED`/`PARTIALLY_OVERTURNED`/`MODIFIED`. No corrected facts → `UPHELD`. Disputing `PENDING`/`UNDER_REVIEW` → `409`; missing line → `404`. (decision #16) |
 | **Out-of-period** | Service date outside the policy active window → `POLICY_NOT_ACTIVE`. |
 | **Integer cents** | Coinsurance on odd amounts (e.g. 20% of 3333 cents) rounds deterministically; member + plan shares always sum to allowed. |
 | **Deductible crossing** | A line that partly meets the remaining deductible → split between deductible (member) and coinsurance; accumulator advances exactly. |

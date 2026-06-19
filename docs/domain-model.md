@@ -150,13 +150,14 @@ SUBMITTED → UNDER_REVIEW → { APPROVED | PARTIALLY_APPROVED | DENIED }   ← 
 ```
 PENDING → ADJUDICATING → { APPROVED | DENIED }
                               │
-                        dispute opened
+                  dispute opened (ANY terminal line)
                               ▼
                          NEEDS_REVIEW → re-adjudicate → { APPROVED | DENIED }
 ```
 
 **Locked state set:** line item `PENDING → { APPROVED | DENIED | NEEDS_REVIEW }`; a dispute
-reopens `DENIED → NEEDS_REVIEW`, which auto re-adjudicates back to `APPROVED | DENIED`.
+reopens **any terminal line** (`APPROVED` or `DENIED`) → `NEEDS_REVIEW`, which auto re-adjudicates
+back to `APPROVED | DENIED` (decision #16 — members dispute underpayments, not only denials).
 `PARTIALLY_APPROVED` is **claim-level only**, never a line state. **No `PAID` state in v1.**
 
 Prior-auth-missing is a clean `DENIED`, **not** `NEEDS_REVIEW` (decision #8); `NEEDS_REVIEW` is
@@ -194,12 +195,44 @@ claim roll-up · dispute reopen. Surfaced as a `timeline` field on `GET /claims/
 endpoint). Append-only; never replayed to derive current status — status columns stay the
 source of truth (this is an audit log, not event sourcing).
 
+## Dispute (first-class) — decision #16
+
+A member challenge to one terminal line item's decision; **synchronous** re-adjudication, no
+reviewer queue. The crux: a deterministic engine re-running identical inputs is a no-op, so a
+dispute carries **corrected facts** and/or binds to **current** rules to flip an outcome.
+
+```ts
+type Dispute = {
+  id: string;
+  lineItemId: string;
+  originalAdjudicationId: string;     // the immutable decision being challenged
+  resolvedAdjudicationId: string;     // the new decision this dispute produced
+  reason: string;                     // member rationale, surfaced verbatim
+  corrected?: {                       // the ONLY amendable line fields
+    priorAuthPresent?: boolean; serviceCode?: string; billedCents?: number; units?: number };
+  outcome: "UPHELD" | "OVERTURNED" | "PARTIALLY_OVERTURNED" | "MODIFIED";
+  state: "OPEN" | "RESOLVED";
+  openedAt: string; resolvedAt: string;
+};
+```
+
+Overlay `corrected` on the line, re-run the adjudicator against **current** rules and
+`current accumulator − this line's own original deltas` (single-line net-out; no cross-claim
+cascade — documented limitation). `outcome` is a diff of the new vs original adjudication; line
+moves `{APPROVED|DENIED} → NEEDS_REVIEW → {APPROVED|DENIED}`, claim `terminal → UNDER_REVIEW →
+terminal`, dispute `OPEN → RESOLVED`. Disputable only from a **terminal** line (`PENDING`/
+`UNDER_REVIEW` → `409`; missing/mismatched → `404`). Surfaced on `GET /claims/:id` as a per-line
+`disputes[]` + `adjudication_history` + `timeline`. Mechanics + TDD cycles 32–36 in
+[`adjudication-plan.md`](adjudication-plan.md).
+
 ## Reason codes
 
 `APPROVED, NO_COVERAGE, EXCLUDED, LIMIT_EXCEEDED, DEDUCTIBLE_APPLIED, COPAY_APPLIED,
 COINSURANCE_APPLIED, OOP_MAX_REACHED, PRIOR_AUTH_REQUIRED, DUPLICATE_LINE_ITEM,
 POLICY_NOT_ACTIVE, DISPUTED_OVERRIDE`. One dominant code classifies each decision; the
-explanation text carries the full breakdown. Mapping table (code → template sentence):
+explanation text carries the full breakdown. `DISPUTED_OVERRIDE` is reserved for a v2 reviewer
+override and is **unused in v1** — an overturned dispute carries the re-derived reason codes of its
+new decision (decision #16). Mapping table (code → template sentence):
 _fill in alongside the explanation builder._
 
 ## Resolved modeling questions (this framing session)

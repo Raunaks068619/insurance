@@ -10,11 +10,12 @@ Framing + design **closed**. C3 adjudication behavior locked in
 determinism, writeback). **Lifecycle strengthened this session:** dropped `PAID`/settle from v1
 (#19 — claim ends at APPROVED/PARTIALLY_APPROVED/DENIED; dispute reopens → UNDER_REVIEW), and
 added a **status-transition audit log** (#20 — one append-only table via a `setStatus()`
-chokepoint, surfaced on `GET /claims/:id`). **TDD build order now 31 cycles** (28–31 = the
-transition log). **In progress: detailing the dispute events** (what a dispute writes +
-re-adjudication transitions) — then start TDD cycle 1 (`no rule → NO_COVERAGE`). Q4 (dispute
-auto vs queue) still open; being resolved in the dispute-events discussion. (Housekeeping:
-regenerate the 3 stale infographics.)
+chokepoint, surfaced on `GET /claims/:id`). **Dispute is now locked first-class (Q4 resolved,
+#21–#23):** corrected-facts re-adjudication, disputable from any terminal line, single-line
+accumulator net-out, a 4-value outcome taxonomy, and a visible reason+outcome — spec + cycles
+32–36 in [`docs/adjudication-plan.md`](docs/adjudication-plan.md). **TDD build order now 36
+cycles** (28–31 = transition log; 32–36 = dispute). **Next: start TDD cycle 1
+(`no rule → NO_COVERAGE`), test-first.** (Housekeeping: regenerate the 3 stale infographics.)
 
 ## Current phase
 
@@ -27,7 +28,7 @@ regenerate the 3 stale infographics.)
 - [x] **Q3 — Accumulator period boundaries.** RESOLVED → fixed plan-year window keyed on the policy.
 - [x] **Q5 — Duplicate handling.** RESOLVED → fingerprint (`member_id + service_code + service_date + billed_cents`) computed at **intake**; the duplicate *decision* is made at **adjudication** as a soft `DUPLICATE_LINE_ITEM` (payable 0). Not an intake reject.
 - [x] **Q6 — NEEDS_REVIEW resolution path.** RESOLVED → prior-auth missing is now a clean `DENIED`, so it no longer routes to `NEEDS_REVIEW`. `NEEDS_REVIEW` is reached **only** via a dispute reopen and clears by immediate auto re-adjudication. No human-review state in v1.
-- [ ] **Q4 — Dispute resolution.** Auto re-adjudicate vs. reviewer queue. Leaning auto, original preserved immutably. (C6 — does not block adjudication TDD cycles 1–25; confirm before cycle 27.)
+- [x] **Q4 — Dispute resolution.** RESOLVED → first-class corrected-facts re-adjudication (decisions #21–#23): disputable from any terminal line, single-line accumulator net-out (`current − this line's original deltas`), 4-value outcome (`UPHELD | OVERTURNED | PARTIALLY_OVERTURNED | MODIFIED`), original preserved immutably, no reviewer queue.
 
 ## Blocked
 
@@ -57,6 +58,9 @@ Nothing blocked.
 | 18 | 2026-06-19 | **C3 adjudication behavior locked** → `docs/adjudication-plan.md` (pipeline, cost-share math, determinism, accumulator writeback, 27-step TDD order) | The "big open" item. Engine is now planned in enough detail to test-drive. Built with System-Architect + DBA agents grounded in the repo docs. | No |
 | 19 | 2026-06-19 | **No `PAID` state / settle in v1** — claim lifecycle ends at APPROVED/PARTIALLY_APPROVED/DENIED; line items at APPROVED/DENIED/NEEDS_REVIEW; dispute reopens → UNDER_REVIEW | The payable *amount* is computed + explained; the PAID *state* needs a settle trigger + gateway (out of scope). Don't model a status we can't truthfully transition. `paid` deferred to v2. Supersedes the PAID half of #8. | No |
 | 20 | 2026-06-19 | **Status-transition audit log** — one append-only polymorphic table via a `setStatus()` chokepoint (4 sites: submit/adjudicated/aggregated/dispute), surfaced on `GET /claims/:id`; not event-sourced | Strengthens lifecycle tracking (a named rubric signal) with ~2 functions; status columns stay source of truth; injected `seq` keeps re-runs deterministic. Adds TDD cycles 28–31. Designed with the System/Solution Architect. | No |
+| 21 | 2026-06-19 | **Dispute trigger = corrected member facts + current-rule binding** (`corrected{prior_auth_present?, service_code?, billed_cents?, units?}`); no corrected facts → `UPHELD`; no reviewer override | A deterministic engine re-running identical inputs is a no-op; a meaningful flip needs a changed input. Binding to current rules also covers retroactive rule changes. No reviewer actor in scope. Resolves Q4. | No |
+| 22 | 2026-06-19 | **Disputable from any terminal line** (APPROVED/partial/DENIED); **single-line re-adjudication with accumulator net-out** (`current − this line's original deltas`); no sibling/cross-claim cascade | Members dispute underpayments too. Blind delta-reversal corrupts shared accumulators; net-out keeps the invariant (each dimension = Σ of every line's *latest* deltas). Cascade out of scope (documented). Corrects adjudication-plan's old "reverse deltas" wording. | No |
+| 23 | 2026-06-19 | **4-value dispute outcome** `UPHELD\|OVERTURNED\|PARTIALLY_OVERTURNED\|MODIFIED` (diff new vs original); line `*→NEEDS_REVIEW→{APPROVED\|DENIED}`; dispute `OPEN→RESOLVED`; `DISPUTED_OVERRIDE` unused (v2 slot) | Deterministic + testable; keeps the locked `NEEDS_REVIEW` name; UPHELD surfaced honestly so a no-change dispute isn't mistaken for broken. Adds TDD cycles 32–36. Confirmed with the user after a 3-agent stress-test. | No |
 
 ## Domain research findings (2026-06-18)
 
@@ -83,6 +87,7 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
 | 2026-06-18 | Claude Code (Opus) | 01-framing → 02-domain-research | Researched claim intake (UHC/Cigna/Aetna + CMS-1500/837); **locked all artifacts + actors**; defined the C2 intake slice (N1–N5); adopted `NEEDS_REVIEW` + `dx_code`/`provider` PHI capture per the infographics; closed Q5. | `/to-prd` the intake slice; regenerate the 3 stale infographics; resolve Q4/Q6 when adjudication (C3) starts. |
 | 2026-06-19 | Claude Code (Opus) | 03-design | Reviewed framing trajectory (adversarial panel: direction good, was over-framing). Ran System-Architect + DBA agents to **lock C3 adjudication behavior** → wrote `docs/adjudication-plan.md` (pipeline + math + determinism + 27-step TDD order). Resolved prior-auth (clean DENY, #15), decision-vs-error boundary (#16), `prior_auth_present` default true (#17); closed Q6. Propagated across PRD, decisions, domain-model. | **Start TDD cycle 1 (`no rule → NO_COVERAGE`), test-first.** Confirm Q4 before cycle 27. Save this session's JSONL to `ai-artifacts/03-design/`. |
 | 2026-06-19 | Claude Code (Opus) | 03-design | Strengthened lifecycle tracking: **dropped `PAID`/settle from v1** (#19) and locked a **status-transition audit log** (#20, designed with the System/Solution Architect) → TDD now 31 cycles. Propagated across PRD, decisions, domain-model, adjudication-plan, visual-reference. | **Detail the dispute events** (what a dispute writes + its re-adjudication transitions, Q4), then start TDD cycle 1. Save this session's JSONL to `ai-artifacts/03-design/`. |
+| 2026-06-19 | Claude Code (Opus) | 03-design | **Closed Q4 — dispute made first-class.** Ran 3 agents (repo audit + domain research + architecture stress-test); surfaced the determinism no-op + the accumulator delta-reversal bug; user confirmed 4 forks. Locked #21–#23; fixed the "reverse deltas" wording → net-out; added dispute spec + cycles 32–36 to adjudication-plan; propagated to decisions (#16). | **Start TDD cycle 1 (`no rule → NO_COVERAGE`), test-first.** Propagate dispute to domain-model + insurance-domain skill. Save this session's JSONL to `ai-artifacts/03-design/`. |
 
 ## Notes for next agent
 
@@ -90,6 +95,6 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
   existing `.git` is at the root, so the root *is* the project.
 - `project-docs/` holds the original assignment brief. Reference it; do not edit it.
 - Nothing in `app/` yet — first code must arrive via a `/tdd-cycle`, test first.
-- **The adjudication build is fully specced in [`docs/adjudication-plan.md`](docs/adjudication-plan.md)** — the **31-cycle** TDD order is the coding checklist. Cycles 1–25 are pure (no DB); 26–31 touch SQLite (28–31 = the status-transition log).
+- **The adjudication build is fully specced in [`docs/adjudication-plan.md`](docs/adjudication-plan.md)** — the **36-cycle** TDD order is the coding checklist. Cycles 1–25 are pure (no DB); 26–36 touch SQLite (28–31 = the status-transition log; 32–36 = the first-class dispute flow).
 - Load the `insurance-domain` + `tdd-discipline` skills before the first cycle.
 - Per the assignment, this design session's raw JSONL must be saved into `ai-artifacts/03-design/` (use `/end-session`).

@@ -132,8 +132,9 @@ One accumulator table keyed by `member_id` + `plan_year`, one row per tracked di
 The rule's `limit.unit` picks the column: `dollars` → `used_cents += plan pay`; `visits` →
 `used_count += 1`. Limit rows are created lazily on first use. The decision write + every
 accumulator increment happen in **one transaction** per line item. A dispute re-adjudication
-reverses the original line's deltas, then applies the new ones, and appends a new Adjudication
-row — the original is never mutated.
+recomputes the disputed line against `current accumulator − that line's own original deltas`
+(a scoped net-out, **never** a blind reversal — see *Dispute re-adjudication* below), then applies
+the new deltas and appends a new Adjudication row — the original is never mutated.
 
 ## PHI handling (minimal, demonstrated)
 
@@ -144,7 +145,7 @@ demonstrated in stance, not over-built for a 24–48h take-home.
 
 ## TDD build order — one behavior per red→green cycle
 
-Tests 1–25 are pure (no DB). 26–31 touch SQLite.
+Tests 1–25 are pure (no DB). 26–36 touch SQLite.
 
 ```
 GATES (pure denials)
@@ -192,7 +193,14 @@ STATUS-TRANSITION LOG (SQLite) — decision #15
 28. setStatus appends one transition row {entity, from, to, actor, reason, seq}; from null on create
 29. full claim submit→adjudicate→aggregate logs the ordered transition set (correct seq order)
 30. re-run identical claim → identical transition rows except created_at (determinism)
-31. dispute reopen logs DENIED→NEEDS_REVIEW (actor MEMBER) then the auto re-adjudication transition; originals untouched   (last)
+31. dispute reopen logs DENIED→NEEDS_REVIEW (actor MEMBER) then the auto re-adjudication transition; originals untouched
+
+DISPUTE — first-class (SQLite) — decision #16
+32. dispute with corrected{prior_auth_present:true} → PRIOR_AUTH_REQUIRED line re-adjudicates APPROVED; outcome OVERTURNED; original preserved
+33. dispute with no corrected facts → identical decision; outcome UPHELD (honest no-op, surfaced not hidden)
+34. dispute an APPROVED line with corrected billed_cents → same status, new numbers; outcome MODIFIED
+35. net-out: re-adjudication uses (current − this line's original deltas), then applies new → accumulator invariant holds; deductible never double-counts
+36. guards: dispute PENDING/UNDER_REVIEW line → 409; missing/mismatched line → 404; dollar-straddle dispute restores partial payable → PARTIALLY_OVERTURNED   (last)
 ```
 
 ## Worked example
@@ -251,6 +259,59 @@ status_transition(
   identical rows except `created_at`.
 - **Read:** a `timeline` field on `GET /claims/:id` (no new endpoint).
 
+## Dispute re-adjudication (first-class) — decision #16
+
+A dispute is a member challenge to one line item's decision. It is **synchronous** (open →
+re-adjudicate → resolve, in one transaction); there is no reviewer queue.
+
+**Endpoint & payload.**
+```
+POST /claims/:id/line-items/:lid/dispute
+{ reason: string,                 // required; member rationale, surfaced verbatim
+  corrected?: {                   // optional; the ONLY amendable line fields
+    prior_auth_present?, service_code?, billed_cents?, units? } }
+```
+`member_id` and `service_date` are not correctable (identity / fingerprint anchors — correcting
+them is a *new* claim). Absent `corrected` → deterministic re-run → almost always `UPHELD`. This
+is the crux: a deterministic engine re-running identical inputs cannot flip an outcome, so a
+meaningful dispute carries a **changed input**. Re-adjudication binds to **current** rules, so a
+retroactive rule change flips an outcome for free.
+
+**Disputable states.** Any **terminal** line: `APPROVED`, partial-`APPROVED` (straddle), or
+`DENIED` — members dispute underpayments too, not only denials. A `PENDING` / `UNDER_REVIEW` line
+→ `409`; a missing / claim-mismatched line → `404` (identity failure is 4xx, per the
+decision-vs-error boundary, decision #12).
+
+**Re-adjudication (single line, net-out).** Overlay `corrected` on the original line and re-run
+the *same* `adjudicateLine` against current rules and a working snapshot =
+`current accumulator − this line's own original deltas`. Persist the new deltas; append a new
+Adjudication; the original stays immutable. **Invariant:** for every accumulator dimension,
+`value = Σ (deltas of the latest adjudication of each line in the plan year)` — the disputed line
+contributes exactly once, at its newest decision. *Not* a blind reversal (corrupts shared
+accumulators when later claims have advanced them); *not* a whole-claim recompute (intervening
+sibling lines are **not** cascaded — a documented v1 limitation).
+
+**Outcome (diff new vs original adjudication).**
+
+| outcome | rule |
+|---|---|
+| `UPHELD` | status, payable, reasons unchanged |
+| `OVERTURNED` | `DENIED → APPROVED`, no residual `LIMIT_EXCEEDED` |
+| `PARTIALLY_OVERTURNED` | `DENIED → APPROVED` but a `LIMIT_EXCEEDED` shortfall remains (dollar straddle) |
+| `MODIFIED` | status unchanged, but payable or reasons changed |
+
+**States.** line `{APPROVED|DENIED} → NEEDS_REVIEW → {APPROVED|DENIED}`; claim
+`terminal → UNDER_REVIEW → terminal` (re-aggregated from all lines); dispute `OPEN → RESOLVED`.
+`NEEDS_REVIEW` is transient — reached only via a dispute, cleared by the immediate auto
+re-adjudication in the same transaction. `DISPUTED_OVERRIDE` stays in the enum but is **unused in
+v1** (reserved for a v2 reviewer override); an overturned dispute carries the *real* re-derived
+reason codes, not `DISPUTED_OVERRIDE`.
+
+**Visibility (`GET /claims/:id`).** Each line gains a `disputes[]` (each: `reason`, `outcome`,
+`original_adjudication_id`, `resolved_adjudication_id`, `opened_at`, `resolved_at`) plus the full
+`adjudication_history` (latest = current); the `timeline` carries the reopen + re-adjudication
+transitions. This is the brief's *"visible dispute reason + outcome."*
+
 ## Deferred from v1 (do not build)
 
 - settle / `PAID` state — deferred to v2; v1 claim lifecycle ends at APPROVED / PARTIALLY_APPROVED / DENIED (decision #14).
@@ -258,5 +319,5 @@ status_transition(
 - visit-limit straddle (visits are whole-unit, hard stop only).
 - out-of-network second cost-share column; fee schedule (allowed ≠ billed).
 - multi-service-date claims; family / Rx accumulators; PPO reduce-to-50% penalty.
-- reviewer queue — disputes auto re-adjudicate (Q4 leaning); no human review state in v1.
+- reviewer queue / discretionary override — disputes auto re-adjudicate corrected facts (Q4 resolved, decision #16); no human review state in v1; cross-claim accumulator cascade on reversal.
 - full event sourcing — the transition log is an audit trail, never replayed to derive state.
