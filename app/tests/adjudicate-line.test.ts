@@ -27,6 +27,81 @@ describe("adjudicateLine — no coverage rule", () => {
   });
 });
 
+describe("adjudicateLine — excluded service", () => {
+  it("denies the line with EXCLUDED and pays nothing when the rule excludes the service", () => {
+    // Arrange — the one load-bearing fact: a rule exists but the service is excluded.
+    const rule = aCoverageRule({ serviceCode: "ADULT_DENTAL", excluded: true });
+    const line = aLineItem({ serviceCode: "ADULT_DENTAL", billedCents: 20_000 });
+    const input = anAdjudicateInput({ line, rule });
+
+    // Act
+    const result = adjudicateLine(input);
+
+    // Assert — an excluded line is a processed denial, distinct from "no rule at all".
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0); // plan pays nothing
+    expect(result.memberResponsibilityCents).toBe(0); // not a cost-share
+
+    // Dominant code is EXCLUDED (not NO_COVERAGE).
+    expect(result.reasons).toEqual(["EXCLUDED"]);
+
+    // A gate denial touches no accumulator.
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+
+    // The explanation says it's an excluded benefit.
+    expect(result.explanation).toMatch(/exclud/i);
+  });
+});
+
+describe("adjudicateLine — rule present but not covered", () => {
+  it("denies with NO_COVERAGE when a rule exists but covered is false", () => {
+    const rule = aCoverageRule({ serviceCode: "COSMETIC", covered: false });
+    const line = aLineItem({ serviceCode: "COSMETIC", billedCents: 30_000 });
+    const result = adjudicateLine(anAdjudicateInput({ line, rule }));
+
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0);
+    expect(result.reasons).toEqual(["NO_COVERAGE"]);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+  });
+});
+
+describe("adjudicateLine — policy not active", () => {
+  it("denies with POLICY_NOT_ACTIVE when the service date is outside the policy window", () => {
+    // Default policy window is 2026-01-01..2026-12-31; this date is after it.
+    const result = adjudicateLine(anAdjudicateInput({ serviceDate: "2027-03-01" }));
+
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0);
+    expect(result.reasons).toEqual(["POLICY_NOT_ACTIVE"]);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+  });
+});
+
+describe("adjudicateLine — prior auth missing", () => {
+  it("cleanly denies with PRIOR_AUTH_REQUIRED when auth is required but not present", () => {
+    const rule = aCoverageRule({ serviceCode: "MRI", requiresPriorAuth: true });
+    const line = aLineItem({ serviceCode: "MRI", priorAuthPresent: false, billedCents: 90_000 });
+    const result = adjudicateLine(anAdjudicateInput({ line, rule }));
+
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0);
+    expect(result.reasons).toEqual(["PRIOR_AUTH_REQUIRED"]);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+  });
+});
+
+describe("adjudicateLine — duplicate line", () => {
+  it("denies with DUPLICATE_LINE_ITEM when the fingerprint was already adjudicated", () => {
+    const result = adjudicateLine(anAdjudicateInput({ alreadyAdjudicated: true }));
+
+    expect(result.status).toBe("DENIED");
+    expect(result.payableCents).toBe(0);
+    expect(result.reasons).toEqual(["DUPLICATE_LINE_ITEM"]);
+    expect(result.deltas).toEqual({ deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 });
+  });
+});
+
 describe("adjudicateLine — full coverage", () => {
   it("pays the plan 100% and the member nothing for a full-coverage service", () => {
     // Arrange — only the load-bearing facts are explicit; builders fill the rest.

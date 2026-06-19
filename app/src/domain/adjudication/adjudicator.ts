@@ -34,25 +34,74 @@ export type AdjudicateLineResult = {
 };
 
 export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult {
-  const { rule, line } = input;
+  const { rule, line, policy, serviceDate, alreadyAdjudicated } = input;
 
-  // Cycle 2 — gate: no rule matched this service_code → NO_COVERAGE. Plan pays
-  // nothing, no accumulator is touched. A denial is a processed decision, not an error.
+  // Every gate denial shares one shape: plan pays nothing, member owes nothing here
+  // (a non-covered service is billed to the member directly, not as cost-share), and
+  // no accumulator is touched. A denial is a processed decision, never an error.
+  const deny = (reason: ReasonCode, explanation: string): AdjudicateLineResult => ({
+    status: "DENIED",
+    payableCents: 0,
+    memberResponsibilityCents: 0,
+    reasons: [reason],
+    explanation,
+    deltas: { deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 },
+  });
+
+  // GATES — fire in pipeline order; the first failing gate denies the line.
+
+  // Cycle 7 — duplicate fingerprint already adjudicated.
+  if (alreadyAdjudicated) {
+    return deny(
+      ReasonCode.DUPLICATE_LINE_ITEM,
+      `Duplicate line: ${line.serviceCode} was already adjudicated; the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Cycle 5 — service date outside the policy's active window. ISO dates compare lexically.
+  if (serviceDate < policy.effectiveDate || serviceDate > policy.terminationDate) {
+    return deny(
+      ReasonCode.POLICY_NOT_ACTIVE,
+      `Policy not active: ${serviceDate} is outside the coverage window (${policy.effectiveDate}–${policy.terminationDate}); the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Cycle 2 — no benefit rule matched this service_code.
   if (!rule) {
-    return {
-      status: "DENIED",
-      payableCents: 0,
-      memberResponsibilityCents: 0,
-      reasons: [ReasonCode.NO_COVERAGE],
-      explanation: `No coverage: no benefit rule applies to ${line.serviceCode}, so the plan pays ${formatUsd(0)}.`,
-      deltas: { deductibleIncCents: 0, oopIncCents: 0, limitInc: 0 },
-    };
+    return deny(
+      ReasonCode.NO_COVERAGE,
+      `No coverage: no benefit rule applies to ${line.serviceCode}, so the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Cycle 3 — the rule explicitly excludes this service.
+  if (rule.excluded) {
+    return deny(
+      ReasonCode.EXCLUDED,
+      `Excluded benefit: ${line.serviceCode} is excluded from the plan, so the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Cycle 4 — the rule exists but the service is not a covered benefit.
+  if (!rule.covered) {
+    return deny(
+      ReasonCode.NO_COVERAGE,
+      `No coverage: ${line.serviceCode} is not a covered benefit, so the plan pays ${formatUsd(0)}.`,
+    );
+  }
+
+  // Cycle 6 — prior auth required but not present → clean deny.
+  if (rule.requiresPriorAuth && !line.priorAuthPresent) {
+    return deny(
+      ReasonCode.PRIOR_AUTH_REQUIRED,
+      `Prior authorization required: ${line.serviceCode} needs prior auth, which was not present; the plan pays ${formatUsd(0)}.`,
+    );
   }
 
   // Cycle 1 — the full-coverage happy path: plan pays 100%, member owes nothing,
-  // deductible/OOP/limit untouched. Every other branch (gates, copay, coinsurance,
-  // limits, OOP) arrives in a later cycle, each driven by its own failing test.
-  if (rule && rule.covered && !rule.excluded && rule.costShare.type === "full_coverage") {
+  // deductible/OOP/limit untouched. Cost-share math (copay, coinsurance, limits,
+  // OOP) arrives in later cycles, each driven by its own failing test.
+  if (rule.costShare.type === "full_coverage") {
     return {
       status: "APPROVED",
       payableCents: line.billedCents,
@@ -63,5 +112,5 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     };
   }
 
-  throw new Error("adjudicateLine: only full_coverage is implemented (TDD cycle 1)");
+  throw new Error("adjudicateLine: cost-share math (copay/coinsurance) not yet implemented (TDD cycles 8+)");
 }
