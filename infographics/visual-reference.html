@@ -76,6 +76,22 @@
     font-size: 0.9em;
     font-family: 'SF Mono', Monaco, Consolas, monospace;
   }
+  /* tables + code blocks used by the inline figures */
+  table { width: 100%; border-collapse: collapse; font-size: 14px; margin: 0; }
+  thead th {
+    text-align: left;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--muted);
+    font-weight: 700;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--border);
+  }
+  tbody td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  pre { margin: 0; overflow-x: auto; }
+  pre code { background: transparent; padding: 0; }
   footer {
     margin-top: 80px;
     padding-top: 24px;
@@ -92,101 +108,601 @@
 <header>
   <h1>Claims System · Visual Reference</h1>
   <p class="lede">
-    Four diagrams that explain the whole system: money flow, domain model,
-    adjudication pipeline, and state machines. Use this for pairing-round
-    walkthroughs and to align any future agent (or human) on the model.
+    The whole system on one page — domain model, coverage rules as data, the gates-then-math
+    adjudication pipeline, the cost-share switch, a claim worked end to end, the accumulator's
+    memory, the decisions that shaped the engine, the state machines, and the 27-cycle TDD build
+    order. Every section is example-induced with real integer-cents numbers. Use it for the
+    round-2 pairing walkthrough and to align any future agent (or human) on the model.
   </p>
 </header>
 
 <section>
-  <h2>01 · The money flow</h2>
+  <h2>01 · The domain model</h2>
   <p class="summary">
-    A claim is a request for reimbursement. Adjudication splits the billed
-    amount across member-owed slices (deductible, copay, coinsurance) and the
-    insurer's payable share. The order matters: change it and every downstream
-    dollar is wrong.
+    Eight entities, cleanly split by what they <em>are</em>: rules are static config, facts are
+    what was submitted, the accumulator is running memory, and adjudications are append-only
+    decisions. That separation is what makes adjudication deterministic and replayable.
   </p>
   <div class="figure">
-    <object type="image/svg+xml" data="01-money-flow.svg" aria-label="Money flow diagram"></object>
+    <table>
+      <thead>
+        <tr><th>Entity</th><th>Layer</th><th>One-line responsibility</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>Member</code></td><td><span style="color:var(--muted)">identity</span></td><td>The insured person who submits claims; holds PHI (name, dob).</td></tr>
+        <tr><td><code>Policy</code></td><td><span style="color:var(--indigo)">rules</span></td><td>Binds a member to coverage for one plan year — active dates, deductible, OOP max.</td></tr>
+        <tr><td><code>CoverageRule</code></td><td><span style="color:var(--indigo)">rules</span></td><td>How one service is covered: cost-share mechanism, deductible applicability, unit-typed limit, prior-auth.</td></tr>
+        <tr><td><code>Claim</code></td><td><span style="color:var(--teal)">facts</span></td><td>A submission envelope grouping line items; status derived, fingerprinted.</td></tr>
+        <tr><td><code>LineItem</code></td><td><span style="color:var(--teal)">facts</span></td><td>One service on a claim — the actual unit of adjudication.</td></tr>
+        <tr><td><code>Accumulator</code></td><td><span style="color:var(--amber)">memory</span></td><td>Per-member-per-plan-year running totals: deductible met, OOP met, per-service limit used.</td></tr>
+        <tr><td><code>Adjudication</code></td><td><span style="color:var(--red)">decisions</span></td><td>The immutable decision for a line item (status, payable, member owes, reason, explanation). Append-only.</td></tr>
+        <tr><td><code>Dispute</code></td><td><span style="color:var(--red)">decisions</span></td><td>A member challenge that reopens a line item and preserves the prior decision.</td></tr>
+      </tbody>
+    </table>
+
+    <svg viewBox="0 0 900 300" role="img" aria-label="Entity relationships" style="margin-top:20px;">
+      <defs>
+        <style>
+          .ent { fill:#fff; stroke:var(--border); stroke-width:1.5; rx:8; }
+          .lbl { font: 600 13px -apple-system, system-ui, sans-serif; fill:var(--text); }
+          .card { font: 600 11px 'SF Mono', Monaco, monospace; fill:var(--muted); }
+          .rel { stroke:var(--muted); stroke-width:1.5; fill:none; }
+        </style>
+      </defs>
+
+      <!-- Member -->
+      <rect class="ent" x="20" y="120" width="120" height="44" rx="8"/>
+      <text class="lbl" x="80" y="147" text-anchor="middle">Member</text>
+
+      <!-- Policy -->
+      <rect class="ent" x="200" y="120" width="120" height="44" rx="8"/>
+      <text class="lbl" x="260" y="147" text-anchor="middle">Policy</text>
+
+      <!-- CoverageRule -->
+      <rect class="ent" x="380" y="120" width="140" height="44" rx="8" style="stroke:var(--indigo);"/>
+      <text class="lbl" x="450" y="147" text-anchor="middle">CoverageRule</text>
+
+      <!-- Claim -->
+      <rect class="ent" x="200" y="20" width="120" height="44" rx="8" style="stroke:var(--teal);"/>
+      <text class="lbl" x="260" y="47" text-anchor="middle">Claim</text>
+
+      <!-- LineItem -->
+      <rect class="ent" x="380" y="20" width="120" height="44" rx="8" style="stroke:var(--teal);"/>
+      <text class="lbl" x="440" y="47" text-anchor="middle">LineItem</text>
+
+      <!-- Adjudication -->
+      <rect class="ent" x="560" y="20" width="140" height="44" rx="8" style="stroke:var(--red);"/>
+      <text class="lbl" x="630" y="47" text-anchor="middle">Adjudication</text>
+
+      <!-- Dispute -->
+      <rect class="ent" x="560" y="100" width="120" height="44" rx="8" style="stroke:var(--red);"/>
+      <text class="lbl" x="620" y="127" text-anchor="middle">Dispute</text>
+
+      <!-- Accumulator -->
+      <rect class="ent" x="200" y="230" width="140" height="44" rx="8" style="stroke:var(--amber);"/>
+      <text class="lbl" x="270" y="257" text-anchor="middle">Accumulator</text>
+
+      <!-- Member 1-1 Policy -->
+      <line class="rel" x1="140" y1="142" x2="200" y2="142"/>
+      <text class="card" x="170" y="136" text-anchor="middle">1—1</text>
+      <!-- Policy 1-N CoverageRule -->
+      <line class="rel" x1="320" y1="142" x2="380" y2="142"/>
+      <text class="card" x="350" y="136" text-anchor="middle">1—N</text>
+      <!-- Member 1-N Claim -->
+      <path class="rel" d="M 80 120 L 80 42 L 200 42"/>
+      <text class="card" x="120" y="36" text-anchor="middle">1—N</text>
+      <!-- Claim 1-N LineItem -->
+      <line class="rel" x1="320" y1="42" x2="380" y2="42"/>
+      <text class="card" x="350" y="36" text-anchor="middle">1—N</text>
+      <!-- LineItem 1-N Adjudication -->
+      <line class="rel" x1="500" y1="42" x2="560" y2="42"/>
+      <text class="card" x="530" y="36" text-anchor="middle">1—N</text>
+      <!-- LineItem 1-N Dispute -->
+      <path class="rel" d="M 440 64 L 440 122 L 560 122"/>
+      <text class="card" x="478" y="100" text-anchor="middle">1—N</text>
+      <!-- Member 1-N Accumulator -->
+      <path class="rel" d="M 80 164 L 80 252 L 200 252"/>
+      <text class="card" x="120" y="246" text-anchor="middle">1—N</text>
+    </svg>
   </div>
   <div class="takeaways">
     <h3>What this proves</h3>
     <ul>
-      <li>Adjudication is <strong>deterministic</strong>. Same inputs → same outputs, every time. This is testable.</li>
-      <li>Money is stored as <strong>integer cents</strong>. Float arithmetic on money is the most common claims bug in industry.</li>
-      <li>The EOB is not a separate report — it falls out of the adjudication's reason codes. One source of truth.</li>
+      <li><strong>Four layers, four responsibilities.</strong> Rules (static) · facts (claim/line) · memory (accumulator) · decisions (adjudication, append-only). A decision is always reproducible from <code>rules + facts + a snapshot of memory</code>.</li>
+      <li><strong>The decision lives on the line item, not the claim.</strong> <code>LineItem 1—N Adjudication</code> is what lets a re-adjudication append a new row while the original is preserved — claim status is derived, never the source of truth.</li>
+      <li><strong>One policy per member per plan year</strong> (<code>Member 1—1 Policy</code>), and one accumulator set per plan year (<code>Member 1—N Accumulator</code>) — limits exhaust correctly across claims within the year.</li>
     </ul>
   </div>
 </section>
 
 <section>
-  <h2>02 · The domain model</h2>
+  <h2>02 · Coverage rules are data, not code</h2>
   <p class="summary">
-    Two bounded contexts. The <strong>adjudication context</strong> is pure
-    functions, no I/O. The <strong>submission context</strong> handles the wire
-    envelope. The seam between them is the only place persistence happens.
-    This separation is what keeps the engine testable.
+    Coverage is a typed config record — not hardcoded branches, not a DSL. A discriminated
+    <code>cost_share</code> union forces exactly one mechanism per service, and a unit-typed
+    <code>limit</code> expresses both dollar caps and visit caps without nullable junk fields.
   </p>
   <div class="figure">
-    <object type="image/svg+xml" data="02-domain-model.svg" aria-label="Domain model diagram"></object>
+    <pre style="margin:0; overflow-x:auto;"><code style="display:block; background:#f8fafc; padding:16px; border-radius:8px; line-height:1.5;">type CoverageRule = {
+  policy_id: string;
+  service_code: string;          <span style="color:var(--muted)">// closed 12-entry catalog; unlisted → NO_COVERAGE</span>
+  covered: boolean;
+  excluded: boolean;             <span style="color:var(--muted)">// explicit EXCLUDED beats "not covered"</span>
+  cost_share:                    <span style="color:var(--indigo)">// discriminated union — one mechanism per service</span>
+    | { type: "full_coverage" }
+    | { type: "copay"; copay_cents: number }
+    | { type: "coinsurance"; rate: number };   <span style="color:var(--muted)">// member share, 0.0–1.0</span>
+  applies_deductible: boolean;   <span style="color:var(--muted)">// copay → usually false; coinsurance → usually true</span>
+  limit:                         <span style="color:var(--amber)">// unit-typed — the load-bearing addition</span>
+    | { unit: "none" }
+    | { unit: "dollars"; amount_cents: number } <span style="color:var(--muted)">// "$Y/yr" — the brief's example</span>
+    | { unit: "visits"; count: number };        <span style="color:var(--muted)">// "20 PT visits/yr"</span>
+  requires_prior_auth: boolean;
+};</code></pre>
+
+    <table style="margin-top:20px;">
+      <thead>
+        <tr><th>Service</th><th>Cost-share</th><th>Deductible</th><th>Limit</th><th>Prior auth</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Annual physical / preventive</td><td><span style="color:var(--teal)">full coverage</span></td><td>no</td><td>—</td><td>no</td></tr>
+        <tr><td>Primary care visit</td><td>$25 copay</td><td>no</td><td>—</td><td>no</td></tr>
+        <tr><td>Specialist visit</td><td>$50 copay</td><td>no</td><td>—</td><td>no</td></tr>
+        <tr><td>Urgent care</td><td>$50 copay</td><td>no</td><td>—</td><td>no</td></tr>
+        <tr><td>Emergency room</td><td>$300 copay</td><td>no</td><td>—</td><td>no</td></tr>
+        <tr><td>Lab / X-ray</td><td>20% coinsurance</td><td>yes</td><td>—</td><td>no</td></tr>
+        <tr><td>MRI / advanced imaging</td><td>20% coinsurance</td><td>yes</td><td>—</td><td><strong style="color:var(--red)">yes</strong></td></tr>
+        <tr><td>Outpatient surgery</td><td>20% coinsurance</td><td>yes</td><td>—</td><td><strong style="color:var(--red)">yes</strong></td></tr>
+        <tr><td>Inpatient hospital</td><td>20% coinsurance</td><td>yes</td><td>—</td><td><strong style="color:var(--red)">yes</strong></td></tr>
+        <tr><td>Physical therapy</td><td>$40 copay</td><td>no</td><td><strong style="color:var(--amber)">20 visits/yr</strong></td><td>no</td></tr>
+        <tr><td>Chiropractic</td><td>$25 copay</td><td>no</td><td><strong style="color:var(--amber)">$1,500/yr</strong></td><td>no</td></tr>
+        <tr><td>Adult dental</td><td><span style="color:var(--red)">excluded</span></td><td>—</td><td>—</td><td>—</td></tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top:18px; padding:14px 16px; background:#f8fafc; border-radius:8px; border:1px dashed var(--border);">
+      <strong style="font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">Mini-example — the brief's "$Y/year"</strong>
+      <p style="margin:8px 0 0;">Chiropractic's $1,500/yr cap is just one row's <code>limit</code> field:</p>
+      <pre style="margin:8px 0 0; overflow-x:auto;"><code style="display:block; background:#fff; padding:12px; border-radius:6px;">{ service_code: "CHIROPRACTIC",
+  cost_share: { type: "copay", copay_cents: 2500 },
+  limit: { unit: "dollars", amount_cents: 150000 } }</code></pre>
+    </div>
   </div>
   <div class="takeaways">
     <h3>What this proves</h3>
     <ul>
-      <li><strong>CoverageRule is data</strong>, not code. A typed config object — not a DSL — is the 80/20 within 48h.</li>
-      <li><strong>Accumulator</strong> is the system's short-term memory. Reading it before adjudication and writing it after is the only transactional step the engine has.</li>
-      <li>The <strong>Claim → LineItem 1:N</strong> relationship is why partial approvals exist. The system grades each line independently and rolls up.</li>
-      <li><strong>Dispute</strong> doesn't mutate the original adjudication — it reopens a line item and produces a new one with a <code>DISPUTED_OVERRIDE</code> reason. History is preserved.</li>
+      <li><strong>The discriminated union encodes a real-world fact:</strong> a benefit uses exactly one cost-share mechanism. Nullable <code>copay_cents</code> + <code>coinsurance_rate</code> fields would make the illegal "both set / neither set" states representable; the union makes them unrepresentable.</li>
+      <li><strong>The <code>unit</code> on <code>limit</code> is load-bearing.</strong> A dollars-only field cannot express "20 PT visits/year" — the most common real-world cap. One discriminator covers both, and the adjudicator picks the column from it.</li>
+      <li><strong>12 rules exercise every branch:</strong> full_coverage, copay, coinsurance, visit-limit, dollar-limit, prior-auth, and excluded — plus any unlisted code falling through to <code>NO_COVERAGE</code>. Adding a 13th service is a data row, not a code change.</li>
     </ul>
   </div>
 </section>
 
+<section><h2>03 · The adjudication pipeline — gates, then math</h2><p class="summary">Each line item walks one ordered pipeline. The first half is <strong>gates</strong> — any one fails, the line short-circuits to a clean denial. The second half is <strong>math</strong> — it always runs to completion and moves money.</p>
+<div class="figure">
+<table>
+<thead><tr><th>#</th><th>Step</th><th>Condition</th><th>On fail → reason code</th><th>Kind</th></tr></thead>
+<tbody>
+<tr><td>0</td><td>Duplicate</td><td>fingerprint not already adjudicated</td><td style="color:var(--red)"><code>DUPLICATE_LINE_ITEM</code>, payable 0</td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>1</td><td>Policy active</td><td><code>effective ≤ serviceDate ≤ termination</code></td><td style="color:var(--red)"><code>POLICY_NOT_ACTIVE</code>, payable 0</td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>2</td><td>Rule exists</td><td>rule found for <code>service_code</code></td><td style="color:var(--red)"><code>NO_COVERAGE</code>, payable 0</td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>3</td><td>Covered / not excluded</td><td><code>!excluded &amp;&amp; covered</code></td><td style="color:var(--red)"><code>EXCLUDED</code> / <code>NO_COVERAGE</code></td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>4</td><td>Prior auth</td><td><code>!requires_prior_auth || prior_auth_present</code></td><td style="color:var(--red)"><code>PRIOR_AUTH_REQUIRED</code>, payable 0</td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>5</td><td>Limit remaining</td><td>visits: <code>used &lt; count</code> · dollars: <code>used &lt; amount</code></td><td style="color:var(--red)"><code>LIMIT_EXCEEDED</code>, payable 0</td><td><span style="color:var(--red);font-weight:700">GATE</span></td></tr>
+<tr><td>6</td><td>Compute allowed</td><td><code>allowed = billed</code> (v1)</td><td style="color:var(--muted)">—</td><td><span style="color:var(--teal);font-weight:700">MATH</span></td></tr>
+<tr><td>7</td><td>Cost-share switch</td><td><code>full_coverage</code> | <code>copay</code> | <code>coinsurance</code></td><td style="color:var(--muted)">—</td><td><span style="color:var(--teal);font-weight:700">MATH</span></td></tr>
+<tr><td>7b</td><td>Dollar-limit straddle</td><td>dollars + plan-pay exceeds remaining</td><td style="color:var(--amber)">cap plan, shortfall→member, line stays <code>APPROVED</code></td><td><span style="color:var(--teal);font-weight:700">MATH</span></td></tr>
+<tr><td>8</td><td>OOP cap</td><td>member share would pass <code>oop_max</code></td><td style="color:var(--amber)">refund excess to plan, <code>OOP_MAX_REACHED</code></td><td><span style="color:var(--teal);font-weight:700">MATH</span></td></tr>
+<tr><td>9</td><td>Build deltas</td><td>deductible / oop / limit increments</td><td style="color:var(--muted)">—</td><td><span style="color:var(--teal);font-weight:700">MATH</span></td></tr>
+</tbody>
+</table>
+<div style="margin-top:20px;padding:16px;border-radius:8px;background:#fef2f2;border:1px solid var(--red)">
+<div style="font-weight:700;color:var(--red);margin-bottom:6px">Mini-example — short-circuit at the prior-auth gate</div>
+<div style="font-size:14px">An <code>MRI</code> line, <code>billed_cents: 120000</code>, but <code>prior_auth_present: false</code>. Step 4 fails. The line stops immediately — steps 5–9 never run, no math, no deductible touched. Result: <code>DENIED</code>, <code>PRIOR_AUTH_REQUIRED</code>, <strong>payable 0</strong>, member owes 0, deltas all 0.</div>
+</div>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>The pipeline has <strong>two halves with different jobs</strong>: gates 0–5 can only <em>deny and stop</em>; math 6–9 can only <em>compute and continue</em>. No step does both.</li>
+<li>A failed gate is a <strong>clean decision</strong> (HTTP 200 + reason), not an error. It short-circuits before any money moves — so a denied line is cheap and fully explainable.</li>
+<li>The straddle (7b) and OOP cap (8) are the only steps that <strong>adjust</strong> rather than deny: they cap a payable and re-attribute the shortfall, leaving the line <code>APPROVED</code>.</li>
+</ul></div>
+</section>
+
+<section><h2>04 · The cost-share switch</h2><p class="summary">Step 7 is one switch on <code>cost_share.type</code> — exactly one mechanism per rule, never stacked. The deductible is touched by <strong>coinsurance only</strong>; <code>copay</code> waives it and <code>full_coverage</code> ignores it.</p>
+<div class="figure">
+<table>
+<thead><tr><th>type</th><th>Deductible</th><th>Member owes</th><th>Plan pays</th><th>Reasons</th></tr></thead>
+<tbody>
+<tr><td><code>full_coverage</code></td><td>untouched</td><td>0</td><td>allowed</td><td><code>[APPROVED]</code></td></tr>
+<tr><td><code>copay</code></td><td><strong>waived</strong>; accrues to OOP only</td><td><code>min(copay, allowed)</code></td><td>allowed − member</td><td><code>[APPROVED, COPAY_APPLIED]</code></td></tr>
+<tr><td><code>coinsurance</code></td><td><strong>applied first</strong> (if <code>applies_deductible</code>)</td><td>dedPortion + coinsPortion</td><td>allowed − member</td><td><code>[APPROVED, DEDUCTIBLE_APPLIED?, COINSURANCE_APPLIED]</code></td></tr>
+</tbody>
+</table>
+<div style="margin-top:20px;padding:16px;border-radius:8px;background:#f0fdfa;border:1px solid var(--teal)">
+<div style="font-weight:700;color:var(--teal);margin-bottom:8px">The coinsurance formula — the only non-trivial branch</div>
+<pre style="margin:0;font-size:13px;font-family:'SF Mono',Monaco,Consolas,monospace;color:var(--text)">remainingDeductible = max(0, deductible_cents − deductible_met_cents)
+dedPortion   = applies_deductible ? min(remainingDeductible, allowed) : 0
+remainder    = allowed − dedPortion
+coinsPortion = Math.round(rate * remainder)        // round half-up
+member       = dedPortion + coinsPortion
+plan         = allowed − member                    // computed last → shares always sum</pre>
+</div>
+<div style="display:grid;grid-template-columns:1fr;gap:12px;margin-top:16px">
+<div style="padding:14px;border-radius:8px;border:1px solid var(--border)">
+<div style="font-weight:700;margin-bottom:4px">(a) full_coverage — $200 preventive line</div>
+<div style="font-size:14px"><code>allowed = 20000c</code>. Member <strong>0c</strong>, plan <strong>20000c</strong>. Deductible and OOP untouched by the mechanism. <code>[APPROVED]</code>.</div>
+</div>
+<div style="padding:14px;border-radius:8px;border:1px solid var(--border)">
+<div style="font-weight:700;margin-bottom:4px">(b) copay — $25 copay on a $180 visit</div>
+<div style="font-size:14px"><code>allowed = 18000c</code>, copay <code>2500c</code>. Member = <code>min(2500, 18000)</code> = <strong>2500c</strong>; plan = <strong>15500c</strong>. Deductible waived; <code>2500c</code> accrues to OOP. <code>[APPROVED, COPAY_APPLIED]</code>.</div>
+</div>
+<div style="padding:14px;border-radius:8px;border:1px solid var(--border)">
+<div style="font-weight:700;margin-bottom:4px">(c) coinsurance — 20% on a $1200 MRI, $300 deductible remaining</div>
+<div style="font-size:14px"><code>allowed = 120000c</code>, <code>remainingDeductible = 30000c</code>. <code>dedPortion = 30000c</code>; <code>remainder = 90000c</code>; <code>coinsPortion = round(0.20 × 90000) = 18000c</code>; member = <strong>48000c</strong>; plan = <code>120000 − 48000</code> = <strong>72000c</strong>. <code>[APPROVED, DEDUCTIBLE_APPLIED, COINSURANCE_APPLIED]</code>.</div>
+</div>
+</div>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>One rule = one mechanism. The switch is <strong>exhaustive</strong> over a discriminated union — incoherent "copay + coinsurance" rules can't be expressed, let alone mis-adjudicated.</li>
+<li><code>plan = allowed − member</code> is computed <strong>last</strong>, so member + plan always equal the allowed amount — no lost or duplicated cent, even with odd-cents rounding.</li>
+<li>Only coinsurance reads/draws the deductible. Copay deliberately <strong>waives</strong> it and routes the flat charge to OOP — matching how real office-visit copays behave.</li>
+</ul></div>
+</section>
+
+<section><h2>05 · A claim, end to end</h2><p class="summary">The flagship worked example: one member, three line items, accumulators moving line by line. Watch the deductible fill and the money split — then the three lines roll up to one claim status.</p>
+<div class="figure">
+<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:20px">
+<div style="flex:1;min-width:200px;padding:14px;border-radius:8px;background:#eef2ff;border:1px solid var(--indigo)">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700">Policy</div>
+<div style="font-size:14px;margin-top:4px">Deductible <strong>$500</strong> (50000c) · OOP max <strong>$3000</strong> (300000c)</div>
+</div>
+<div style="flex:1;min-width:200px;padding:14px;border-radius:8px;background:#eef2ff;border:1px solid var(--indigo)">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700">Starting accumulators</div>
+<div style="font-size:14px;margin-top:4px">DEDUCTIBLE met <strong>20000c</strong> · OOP met <strong>20000c</strong> · no limit rows</div>
+</div>
+</div>
+
+<div style="display:flex;flex-direction:column;gap:14px">
+<div style="padding:16px;border-radius:8px;border:1px solid var(--red);background:#fef2f2">
+<div style="font-weight:700">L1 · unknown code — no matching rule</div>
+<div style="font-size:14px;margin-top:6px">Gate 2 fails → <code>NO_COVERAGE</code>. <strong>DENIED</strong>, payable <strong>0c</strong>, member <strong>0c</strong>. Deltas all 0.</div>
+<div style="font-size:13px;color:var(--muted);margin-top:8px">Accumulators: DEDUCTIBLE 20000c → <strong>20000c</strong> · OOP 20000c → <strong>20000c</strong> (unchanged)</div>
+</div>
+<div style="padding:16px;border-radius:8px;border:1px solid var(--teal);background:#f0fdfa">
+<div style="font-weight:700">L2 · PCP_VISIT — $25 copay on $180 (18000c)</div>
+<div style="font-size:14px;margin-top:6px">copay = <code>min(2500, 18000)</code> = member <strong>2500c</strong>; plan <strong>15500c</strong>. Deductible waived; copay → OOP. <code>[APPROVED, COPAY_APPLIED]</code></div>
+<div style="font-size:13px;color:var(--muted);margin-top:8px">Accumulators: DEDUCTIBLE 20000c → <strong>20000c</strong> · OOP 20000c → <strong>22500c</strong> (<code>+2500</code>)</div>
+</div>
+<div style="padding:16px;border-radius:8px;border:1px solid var(--teal);background:#f0fdfa">
+<div style="font-weight:700">L3 · MRI — 20% coinsurance on $1200 (120000c), prior_auth_present=true</div>
+<div style="font-size:14px;margin-top:6px"><code>remainingDeductible = 50000 − 20000 = 30000c</code>; <code>dedPortion = 30000c</code>; <code>remainder = 90000c</code>; <code>coinsPortion = round(0.20 × 90000) = 18000c</code>; member <strong>48000c</strong>; plan <strong>72000c</strong>. OOP check: 22500 + 48000 = 70500c &lt; 300000 → no clamp. <code>[APPROVED, DEDUCTIBLE_APPLIED, COINSURANCE_APPLIED]</code></div>
+<div style="font-size:13px;color:var(--muted);margin-top:8px">Accumulators: DEDUCTIBLE 20000c → <strong>50000c</strong> (<code>+30000</code>, met) · OOP 22500c → <strong>70500c</strong> (<code>+48000</code>)</div>
+</div>
+</div>
+
+<table style="margin-top:20px">
+<thead><tr><th>Line</th><th>Status</th><th>Payable</th><th>Member owes</th></tr></thead>
+<tbody>
+<tr><td>L1</td><td style="color:var(--red)">DENIED</td><td>$0</td><td>$0</td></tr>
+<tr><td>L2</td><td style="color:var(--teal)">APPROVED</td><td>$155</td><td>$25</td></tr>
+<tr><td>L3</td><td style="color:var(--teal)">APPROVED</td><td>$720</td><td>$480</td></tr>
+<tr style="font-weight:700;border-top:2px solid var(--border)"><td>Claim</td><td style="color:var(--amber)">PARTIALLY_APPROVED</td><td>$875</td><td>$505</td></tr>
+</tbody>
+</table>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>Cross-line state is <strong>real</strong>: L3 sees the deductible L2 left alone, draws the full remaining <code>30000c</code>, and pushes it to met. Lines are processed in order against a single working snapshot.</li>
+<li>Every covered line satisfies the invariant <code>payable + member == billed</code> ($155+$25=$180; $720+$480=$1200). The denied line is 0/0.</li>
+<li>A mix of DENIED + APPROVED rolls up to <strong>PARTIALLY_APPROVED</strong> — plan pays <strong>$875</strong>, member owes <strong>$505</strong>. Re-running the same claim on the same starting snapshot reproduces these exact numbers.</li>
+</ul></div>
+</section>
+
 <section>
-  <h2>03 · The 11-step adjudication pipeline</h2>
+  <h2>06 · The accumulator — the system's memory</h2>
   <p class="summary">
-    Each line item runs through these 11 steps in this exact order. Steps 1-5
-    can short-circuit with a denial reason. Steps 6-11 do the arithmetic and
-    always run to completion. Each step is a pure function. Each reason code
-    has at least one test.
+    One table keyed by <code>member_id + plan_year</code>, with a <strong>dimension discriminator</strong>
+    per row. This is what makes limits exhaust correctly across separate claims within a year, and
+    it stores dollar limits and visit limits in different columns of the same shape.
   </p>
   <div class="figure">
-    <object type="image/svg+xml" data="03-adjudication-pipeline.svg" aria-label="Adjudication pipeline"></object>
+    <table>
+      <thead>
+        <tr><th>dimension</th><th>tracks</th><th>column used</th></tr>
+      </thead>
+      <tbody>
+        <tr><td><code>DEDUCTIBLE</code></td><td>deductible met</td><td><code>used_cents</code></td></tr>
+        <tr><td><code>OOP</code></td><td>out-of-pocket met</td><td><code>used_cents</code></td></tr>
+        <tr><td><code>LIMIT:&lt;service_code&gt;</code></td><td>per-service usage</td><td><code>used_cents</code> (dollar limit) <strong>or</strong> <code>used_count</code> (visit limit)</td></tr>
+      </tbody>
+    </table>
+    <p style="margin:14px 0 0; color:var(--muted); font-size:14px;">
+      Row shape: <code>(member_id, plan_year, dimension, used_cents, used_count)</code>. The rule's
+      <code>limit.unit</code> picks the column — <code>dollars</code> → <code>used_cents += plan pay</code>;
+      <code>visits</code> → <code>used_count += 1</code>. <code>LIMIT:</code> rows are created lazily on first use.
+    </p>
+
+    <div style="margin-top:22px;">
+      <strong style="font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">Worked example — flagship claim (policy: deductible $500 / 50000c, OOP max $3000 / 300000c)</strong>
+      <div style="display:flex; gap:16px; flex-wrap:wrap; margin-top:12px; align-items:stretch;">
+        <div style="flex:1; min-width:220px; background:#f8fafc; border-radius:8px; padding:14px; border:1px solid var(--border);">
+          <div style="font-weight:700; margin-bottom:8px; color:var(--muted);">BEFORE</div>
+          <table style="font-size:13px;">
+            <tbody>
+              <tr><td><code>DEDUCTIBLE</code></td><td style="text-align:right;">used_cents <strong>20000</strong></td></tr>
+              <tr><td><code>OOP</code></td><td style="text-align:right;">used_cents <strong>20000</strong></td></tr>
+              <tr><td colspan="2" style="color:var(--muted);">(no LIMIT rows yet)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex; align-items:center; font-size:24px; color:var(--indigo);">→</div>
+        <div style="flex:1; min-width:220px; background:#f8fafc; border-radius:8px; padding:14px; border:1px solid var(--teal);">
+          <div style="font-weight:700; margin-bottom:8px; color:var(--teal);">AFTER (PCP copay + MRI coinsurance lines)</div>
+          <table style="font-size:13px;">
+            <tbody>
+              <tr><td><code>DEDUCTIBLE</code></td><td style="text-align:right;">used_cents <strong>50000</strong></td></tr>
+              <tr><td><code>OOP</code></td><td style="text-align:right;">used_cents <strong>70500</strong></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <p style="margin:14px 0 0; font-size:14px;">
+        <strong>L2 — PCP_VISIT, $25 copay:</strong> copay waives the deductible and accrues to OOP only →
+        <code>OOP += 2500</code> (20000 → 22500). Deductible untouched.<br>
+        <strong>L3 — MRI, 20% coinsurance, applies_deductible:</strong> remaining deductible 30000c drawn first →
+        <code>DEDUCTIBLE += 30000</code> (20000 → 50000, now met); coinsurance 18000c on the remainder → member 48000c →
+        <code>OOP += 48000</code> (22500 → 70500).
+      </p>
+      <p style="margin:12px 0 0; padding:10px 14px; background:#fef9f3; border-left:3px solid var(--amber); border-radius:4px; font-size:14px;">
+        <strong>Dollar vs visit columns:</strong> had a Chiropractic line landed, it would write
+        <code>LIMIT:CHIROPRACTIC.used_cents += plan pay</code>. A PT line writes
+        <code>LIMIT:PHYSICAL_THERAPY.used_count += 1</code> — same row shape, the <code>unit</code>
+        decides which counter moves.
+      </p>
+    </div>
   </div>
   <div class="takeaways">
     <h3>What this proves</h3>
     <ul>
-      <li>The pipeline is <strong>composable pure functions</strong>, not a single mega-function. Each step takes <code>(state, line_item, policy)</code> and returns either continuation or short-circuit.</li>
-      <li>A line item can carry <strong>multiple reason codes</strong>. A typical approved claim carries <code>DEDUCTIBLE_APPLIED</code> + <code>COPAY_APPLIED</code> + <code>COINSURANCE_APPLIED</code> simultaneously.</li>
-      <li>The <strong>writeAccumulator</strong> step happens exactly once, at the end. No partial writes, no race conditions within a single adjudication.</li>
-      <li>Adding a new reason code is <strong>localized</strong>: one new step (or one branch in an existing step), one explanation template, one test. The shape of the system absorbs the change.</li>
+      <li><strong>The dimension discriminator avoids a column-per-service-code schema.</strong> One row shape handles deductible, OOP, and N per-service limits; a new limited service adds a lazily-created <code>LIMIT:</code> row, not a migration.</li>
+      <li><strong>Cross-claim memory is the whole point.</strong> The before-state isn't theoretical — it's a prior claim's residue. Limits exhaust correctly because every claim reads then increments the same keyed totals.</li>
+      <li><strong>One shape, two units.</strong> <code>used_cents</code> vs <code>used_count</code> keeps dollar caps and visit caps in the same table while preserving the unit's meaning — no float, no overloaded single column.</li>
     </ul>
   </div>
 </section>
 
+<section><h2>07 · Decisions that shaped the engine</h2><p class="summary">Three resolved judgment calls behind the engine's behavior — each one trades a real alternative for determinism and explainability under a 48-hour, no-reviewer-queue scope.</p>
+<div class="figure">
+<div style="display:flex;flex-direction:column;gap:16px">
+
+<div style="border:1px solid var(--border);border-left:4px solid var(--indigo);border-radius:8px;padding:18px">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--indigo);font-weight:700">Decision #8</div>
+<div style="font-weight:700;font-size:16px;margin:4px 0">Prior-auth missing = clean DENY, not NEEDS_REVIEW</div>
+<div style="font-size:14px">A required-auth line with <code>prior_auth_present: false</code> becomes a clean <code>DENIED</code> carrying <code>PRIOR_AUTH_REQUIRED</code>, payable 0.</div>
+<div style="font-size:14px;margin-top:8px;color:var(--muted)"><strong>Why:</strong> there is no human-reviewer queue in scope. A <code>NEEDS_REVIEW</code> line would never resolve and would freeze claim aggregation at <code>UNDER_REVIEW</code> forever. A clean deny is deterministic and fully explainable.</div>
+</div>
+
+<div style="border:1px solid var(--border);border-left:4px solid var(--indigo);border-radius:8px;padding:18px">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--indigo);font-weight:700">Decision #12</div>
+<div style="font-weight:700;font-size:16px;margin:4px 0">Adjudication outcomes are DECISIONS (HTTP 200), not errors</div>
+<div style="font-size:14px">Every denial returns <code>200</code> with <code>status</code> + <code>reason</code> + <code>explanation</code>. Only malformed/identity-failed <em>input</em> is <code>4xx</code>.</div>
+<table style="margin-top:12px">
+<thead><tr><th>Input</th><th>HTTP</th><th>Outcome</th></tr></thead>
+<tbody>
+<tr><td><code>prior_auth_present: false</code></td><td style="color:var(--teal)">200</td><td>denied line, <code>PRIOR_AUTH_REQUIRED</code> + explanation</td></tr>
+<tr><td><code>prior_auth_present</code> omitted</td><td style="color:var(--teal)">200</td><td>adjudicated as auth present (default true)</td></tr>
+<tr><td><code>billed_cents: "abc"</code></td><td style="color:var(--red)">400</td><td>intake error, nothing persisted</td></tr>
+</tbody>
+</table>
+<div style="font-size:14px;margin-top:8px;color:var(--muted)"><strong>Why:</strong> an HTTP error explains nothing to a member and would break "5 line items, 1 denied" and "explain why it was denied." A denied line is a <em>processed</em> line.</div>
+</div>
+
+<div style="border:1px solid var(--border);border-left:4px solid var(--indigo);border-radius:8px;padding:18px">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--indigo);font-weight:700">Decision #13</div>
+<div style="font-weight:700;font-size:16px;margin:4px 0">prior_auth_present defaults to true (absence = auth present)</div>
+<div style="font-size:14px">When a line omits <code>prior_auth_present</code>, treat it as <code>true</code>. The <code>PRIOR_AUTH_REQUIRED</code> path fires <strong>only</strong> on an explicit <code>false</code>.</div>
+<div style="font-size:14px;margin-top:8px;color:var(--muted)"><strong>Why:</strong> most services don't require prior auth, so a <code>true</code> default keeps the common input frictionless; callers assert <code>false</code> only when relevant. (Documented as a demo simplification — real systems treat absence as unauthorized.)</div>
+</div>
+
+</div>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>Every decision is grounded in a <strong>scope constraint</strong> (no reviewer queue, 48h budget), not preference — and each is reversible at a single seam if the constraint lifts.</li>
+<li>The decision/error boundary is the engine's <strong>core contract</strong>: business denials are data (200 + reason), only bad input is a protocol error (4xx).</li>
+<li>The <code>true</code> default makes the happy path frictionless while keeping the denial path one explicit <code>false</code> away — the divergence from real systems is named, not hidden.</li>
+</ul></div>
+</section>
+
 <section>
-  <h2>04 · State machines &amp; aggregation</h2>
+  <h2>08 · Immutability, disputes &amp; PHI</h2>
   <p class="summary">
-    Two state machines move independently. The <strong>line-item</strong>
-    machine is what the engine produces directly. The <strong>claim</strong>
-    machine is <em>derived</em> from line-item states via the aggregation
-    function — it is never set directly.
+    Decisions are append-only, each line's decision-plus-accumulator-write is one transaction,
+    and PHI is kept structurally unreachable by the engine. Together these make the system
+    auditable, consistent, and honest about sensitive data without over-building.
   </p>
   <div class="figure">
-    <object type="image/svg+xml" data="04-state-machines.svg" aria-label="State machines and aggregation"></object>
+    <div style="display:grid; grid-template-columns:1fr; gap:16px;">
+      <div style="background:#f8fafc; border-radius:8px; padding:16px; border:1px solid var(--border);">
+        <div style="font-weight:700; color:var(--red); margin-bottom:6px;">(a) Adjudications are append-only</div>
+        <p style="margin:0; font-size:14px;">Re-adjudication never mutates the original row. It <strong>reverses</strong> the line's original accumulator deltas, <strong>reapplies</strong> the new ones, and <strong>appends</strong> a new Adjudication. History is the audit trail.</p>
+      </div>
+      <div style="background:#f8fafc; border-radius:8px; padding:16px; border:1px solid var(--border);">
+        <div style="font-weight:700; color:var(--indigo); margin-bottom:6px;">(b) One transaction per line item</div>
+        <p style="margin:0; font-size:14px;">The decision write <em>and</em> every accumulator increment (deductible / OOP / limit) commit together in a single <code>better-sqlite3</code> transaction. Synchronous single-writer → no interleaving, no half-applied decision.</p>
+      </div>
+      <div style="background:#f8fafc; border-radius:8px; padding:16px; border:1px solid var(--border);">
+        <div style="font-weight:700; color:var(--amber); margin-bottom:6px;">(c) PHI is structurally unreachable</div>
+        <p style="margin:0; font-size:14px;"><code>Member.name</code>/<code>dob</code> and <code>Claim.provider</code>/<code>diagnosis_code</code> are sensitive. The engine input type keys on <code>member_id</code> only — it <em>cannot</em> read PHI because those fields aren't in its input shape. Column-level encryption-at-rest is documented as a candidate, not over-built for a 24–48h take-home.</p>
+      </div>
+    </div>
+
+    <div style="margin-top:20px; padding:14px 16px; background:#f8fafc; border-radius:8px; border:1px dashed var(--border);">
+      <strong style="font-size:13px; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">Mini-example — disputing a denied MRI line</strong>
+      <svg viewBox="0 0 880 110" role="img" aria-label="Dispute appends a new adjudication" style="margin-top:10px;">
+        <defs>
+          <style>
+            .box { fill:#fff; stroke-width:1.5; rx:8; }
+            .t { font: 600 12px -apple-system, system-ui, sans-serif; fill:var(--text); }
+            .s { font: 500 11px 'SF Mono', Monaco, monospace; fill:var(--muted); }
+            .arr { stroke:var(--muted); stroke-width:1.5; fill:none; marker-end:url(#ah); }
+          </style>
+          <marker id="ah" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--muted)"/></marker>
+        </defs>
+        <rect class="box" x="10" y="30" width="200" height="50" style="stroke:var(--red);"/>
+        <text class="t" x="110" y="52" text-anchor="middle">Adjudication #1</text>
+        <text class="s" x="110" y="70" text-anchor="middle">DENIED · PRIOR_AUTH_REQUIRED</text>
+
+        <line class="arr" x1="210" y1="55" x2="300" y2="55"/>
+        <text class="s" x="255" y="46" text-anchor="middle">dispute</text>
+
+        <rect class="box" x="300" y="30" width="200" height="50" style="stroke:var(--muted); stroke-dasharray:4 3;"/>
+        <text class="t" x="400" y="52" text-anchor="middle">reverse deltas</text>
+        <text class="s" x="400" y="70" text-anchor="middle">re-adjudicate (auto)</text>
+
+        <line class="arr" x1="500" y1="55" x2="590" y2="55"/>
+        <text class="s" x="545" y="46" text-anchor="middle">append</text>
+
+        <rect class="box" x="590" y="30" width="270" height="50" style="stroke:var(--teal);"/>
+        <text class="t" x="725" y="52" text-anchor="middle">Adjudication #2</text>
+        <text class="s" x="725" y="70" text-anchor="middle">APPROVED · DISPUTED_OVERRIDE</text>
+      </svg>
+      <p style="margin:8px 0 0; font-size:14px;">The original <code>DENIED</code> row is preserved verbatim; the new <code>APPROVED</code> row is appended with a <code>DISPUTED_OVERRIDE</code> reason, and the line's accumulator deltas are reversed then reapplied — both writes in one transaction.</p>
+    </div>
   </div>
   <div class="takeaways">
     <h3>What this proves</h3>
     <ul>
-      <li>Claim state is <strong>derived</strong>, not stored. <code>claimStateFrom(items)</code> is a pure function. This eliminates an entire class of "claim says approved but line items say denied" bugs.</li>
-      <li>The aggregation table has <strong>exhaustive test coverage</strong>: each row is one test case. <code>NEEDS_REVIEW</code> overrides everything else, which is the rule a real claims adjuster would expect.</li>
-      <li>The <strong>dispute loop</strong> reopens any terminal state. From a state-machine perspective, terminal isn't actually terminal — it's "terminal-until-disputed."</li>
-      <li>The <strong>PAID</strong> transition is the only one that requires a side effect (recording payment). Everything else is in-memory state arithmetic.</li>
+      <li><strong>Append-only is the audit story.</strong> You can always answer "what did we decide, when, and why" — the original decision survives every dispute, so there's no destructive overwrite to reconstruct.</li>
+      <li><strong>Atomicity is per line item.</strong> Decision + accumulator increments are one transaction, so the accumulator can never drift from the decisions that produced it — even mid-claim.</li>
+      <li><strong>PHI minimization is enforced by the type system,</strong> not by discipline. The engine literally has no field to read <code>diagnosis_code</code> from; encryption-at-rest is named as the next step rather than half-implemented.</li>
     </ul>
   </div>
+</section>
+
+<section><h2>09 · State machines &amp; aggregation</h2><p class="summary">The engine produces the <strong>line-item</strong> state directly; the <strong>claim</strong> state is derived by aggregating its lines — never set directly. <code>NEEDS_REVIEW</code> is now reachable only through a dispute reopen.</p>
+<div class="figure">
+<div style="margin-bottom:20px">
+<div style="font-size:12px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:700;margin-bottom:10px">Line-item lifecycle</div>
+<svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,sans-serif" font-size="13">
+<defs><marker id="ah" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#64748b"/></marker></defs>
+<rect x="10" y="55" width="90" height="36" rx="8" fill="#f1f5f9" stroke="#64748b"/><text x="55" y="78" text-anchor="middle">PENDING</text>
+<rect x="200" y="10" width="100" height="36" rx="8" fill="#f0fdfa" stroke="#14b8a6"/><text x="250" y="33" text-anchor="middle" fill="#0f766e">APPROVED</text>
+<rect x="200" y="55" width="100" height="36" rx="8" fill="#fef2f2" stroke="#dc2626"/><text x="250" y="78" text-anchor="middle" fill="#b91c1c">DENIED</text>
+<rect x="200" y="100" width="120" height="36" rx="8" fill="#fffbeb" stroke="#f59e0b"/><text x="260" y="123" text-anchor="middle" fill="#b45309">NEEDS_REVIEW</text>
+<rect x="430" y="55" width="80" height="36" rx="8" fill="#eef2ff" stroke="#6366f1"/><text x="470" y="78" text-anchor="middle" fill="#4338ca">PAID</text>
+<line x1="100" y1="68" x2="198" y2="33" stroke="#64748b" marker-end="url(#ah)"/>
+<line x1="100" y1="73" x2="198" y2="73" stroke="#64748b" marker-end="url(#ah)"/>
+<line x1="100" y1="78" x2="198" y2="113" stroke="#64748b" marker-end="url(#ah)"/>
+<line x1="300" y1="33" x2="428" y2="68" stroke="#64748b" marker-end="url(#ah)"/>
+<path d="M470,91 C470,140 560,140 560,73 L560,55" fill="none" stroke="#6366f1" stroke-dasharray="4 3" marker-end="url(#ah)"/>
+<text x="615" y="120" fill="#6366f1" font-size="12">dispute reopens</text>
+</svg>
+</div>
+<table>
+<thead><tr><th>Line outcomes</th><th>Derived claim status</th></tr></thead>
+<tbody>
+<tr><td>every line DENIED</td><td style="color:var(--red)">DENIED</td></tr>
+<tr><td>every line APPROVED (full payable)</td><td style="color:var(--teal)">APPROVED</td></tr>
+<tr><td>mix of APPROVED + DENIED, or any dollar-straddle partial</td><td style="color:var(--amber)">PARTIALLY_APPROVED</td></tr>
+<tr><td>any line NEEDS_REVIEW / disputed re-adjudicating</td><td style="color:var(--amber)">UNDER_REVIEW</td></tr>
+<tr><td>every payable line PAID, none open</td><td style="color:var(--indigo)">PAID</td></tr>
+</tbody>
+</table>
+<div style="margin-top:16px;padding:14px;border-radius:8px;background:#eef2ff;border:1px solid var(--indigo);font-size:14px">
+<strong>Mini-example:</strong> the worked claim from §05 — lines [DENIED, APPROVED, APPROVED] → a mix → claim <code>PARTIALLY_APPROVED</code>. Flip L2/L3 to disputed and re-adjudicating → claim <code>UNDER_REVIEW</code>.
+</div>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>Claim state is <strong>derived, not stored</strong>: <code>claimStatusFrom(lines)</code> is a pure aggregation, killing the "claim says approved but lines say denied" class of bug.</li>
+<li><code>PARTIALLY_APPROVED</code> is <strong>claim-level only</strong> — never a line state. A straddled line is itself <code>APPROVED</code> with a <code>LIMIT_EXCEEDED</code> note.</li>
+<li><code>NEEDS_REVIEW</code> survives as a state but is now reached <strong>only via a dispute reopen</strong> — prior-auth-missing is a clean <code>DENIED</code> (decision #8), so it never freezes a fresh claim.</li>
+</ul></div>
+</section>
+
+<section><h2>10 · The build order — 27 test-first cycles</h2><p class="summary">The engine is test-driven one behavior per red→green cycle, in this order. Cycles <strong>1–25 are pure</strong> (a plain object, no DB); only 26–27 touch SQLite. This is the coding checklist.</p>
+<div class="figure">
+<div style="display:flex;flex-direction:column;gap:14px">
+
+<div style="border-left:4px solid var(--red);background:#fef2f2;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:var(--red)">Gates · cycles 1–7 — pure denials</div>
+<ol start="1" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>full_coverage line → member 0, plan = billed</li>
+<li>no rule → NO_COVERAGE, payable 0, DENIED</li>
+<li>excluded rule → EXCLUDED, payable 0</li>
+<li><code>covered == false</code> → NO_COVERAGE, payable 0</li>
+<li>service date outside policy window → POLICY_NOT_ACTIVE</li>
+<li>requires_prior_auth &amp;&amp; <code>prior_auth_present == false</code> → PRIOR_AUTH_REQUIRED, clean DENY</li>
+<li>duplicate fingerprint → DUPLICATE_LINE_ITEM, payable 0, original untouched</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--teal);background:#f0fdfa;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#0f766e">Cost-share · cycles 8–13 — single line, fresh accumulators</div>
+<ol start="8" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>copay, allowed &gt; copay → member = copay, plan = allowed − copay, deductible untouched</li>
+<li>copay, allowed &lt; copay → member = allowed, plan = 0 (min clamp)</li>
+<li>coinsurance, deductible already met → member = round(rate·allowed), plan = rest</li>
+<li>coinsurance, allowed &lt; remaining deductible → all to deductible, coins 0, plan 0</li>
+<li>coinsurance deductible crossing → split ded + coins; shares sum to allowed</li>
+<li>coinsurance odd cents (20% of 3333) → deterministic rounding; member + plan == allowed</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--amber);background:#fffbeb;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#b45309">Limits · cycles 14–17</div>
+<ol start="14" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>visits, used &lt; count → approved, limit_inc = 1</li>
+<li>visits, used ≥ count → LIMIT_EXCEEDED, payable 0 (whole-visit, no straddle)</li>
+<li>dollars, payable within remaining → approved, limit_inc = plan pay</li>
+<li>dollars straddle → plan caps at remaining, shortfall→member, LIMIT_EXCEEDED, line APPROVED</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--amber);background:#fffbeb;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#b45309">OOP cap · cycles 18–19</div>
+<ol start="18" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>member share would pass oop_max → excess refunded to plan, OOP_MAX_REACHED</li>
+<li>accumulator already at oop_max → next line plan pays 100%, member 0</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--indigo);background:#eef2ff;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#4338ca">Cross-line / determinism · cycles 20–21</div>
+<ol start="20" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>two coinsurance lines, one claim → line 2 sees line 1's advanced deductible</li>
+<li>re-run identical claim on identical snapshot → identical results</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--indigo);background:#eef2ff;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:#4338ca">Aggregation · cycles 22–25 — line[] → claim</div>
+<ol start="22" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>all approved → claim APPROVED</li>
+<li>all denied → claim DENIED</li>
+<li>mix approved + denied → claim PARTIALLY_APPROVED</li>
+<li>straddled-partial + full approved → claim PARTIALLY_APPROVED</li>
+</ol>
+</div>
+
+<div style="border-left:4px solid var(--muted);background:#f8fafc;border-radius:6px;padding:14px">
+<div style="font-weight:700;color:var(--muted)">Writeback / integration · cycles 26–27 — SQLite</div>
+<ol start="26" style="margin:8px 0 0;padding-left:22px;font-size:14px">
+<li>full claim through the real store: accumulators persist, adjudications append-only, one txn</li>
+<li>dispute reopens a line, re-adjudicates, preserves the original immutably (last)</li>
+</ol>
+</div>
+
+</div>
+</div>
+<div class="takeaways"><h3>What this proves</h3><ul>
+<li>The order is <strong>gates → cost-share → limits → OOP → cross-line → aggregation → persistence</strong>: each cycle adds exactly one behavior on top of green, so a failing test always names the behavior that broke.</li>
+<li><strong>Cycles 1–25 need no database</strong> — they run against a plain accumulator snapshot object. The pure core is fully proven before SQLite ever appears.</li>
+<li>Determinism (cycle 21) and immutable disputes (cycle 27) are <strong>explicit tests</strong>, not hopes: re-running a claim on the same snapshot must reproduce identical cents.</li>
+</ul></div>
 </section>
 
 <footer>
-  Generated for the realfast FDE Level-1 take-home · drop into <code>docs/</code> as visual reference for the round-2 pairing session.
+  Generated for the realfast FDE Level-1 take-home · the single visual source of truth for the
+  round-2 pairing session. Mirrors <code>docs/adjudication-plan.md</code> · <code>docs/domain-model.md</code> · <code>docs/decisions.md</code>.
 </footer>
 
 </div>
