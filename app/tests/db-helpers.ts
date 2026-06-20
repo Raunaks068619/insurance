@@ -12,11 +12,16 @@ import { createAccumulatorRepository } from "../src/repositories/accumulator.rep
 import { createAdjudicationRepository } from "../src/repositories/adjudication.repository";
 import { createClaimRepository } from "../src/repositories/claim.repository";
 import { createCoverageRuleRepository } from "../src/repositories/coverage-rule.repository";
+import { createDisputeRepository } from "../src/repositories/dispute.repository";
 import { createPolicyRepository } from "../src/repositories/policy.repository";
 import {
   type ClaimServiceDeps,
   createClaimService,
 } from "../src/services/claim.service";
+import {
+  type DisputeServiceDeps,
+  createDisputeService,
+} from "../src/services/dispute.service";
 
 export function freshDb() {
   const handle = createDb(":memory:");
@@ -36,6 +41,23 @@ export function makeClaimService(
     coverageRules: createCoverageRuleRepository(db),
     policies: createPolicyRepository(db),
     // one transaction per claim — better-sqlite3 wraps every statement on this connection
+    withTransaction: <T>(fn: () => T): T => sqlite.transaction(fn)(),
+    ...overrides,
+  });
+}
+
+export function makeDisputeService(
+  handle: DbHandle,
+  overrides: Partial<DisputeServiceDeps> = {},
+) {
+  const { db, sqlite } = handle;
+  return createDisputeService({
+    claims: createClaimRepository(db),
+    adjudications: createAdjudicationRepository(db),
+    accumulators: createAccumulatorRepository(db),
+    coverageRules: createCoverageRuleRepository(db),
+    policies: createPolicyRepository(db),
+    disputes: createDisputeRepository(db),
     withTransaction: <T>(fn: () => T): T => sqlite.transaction(fn)(),
     ...overrides,
   });

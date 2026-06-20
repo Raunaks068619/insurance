@@ -32,6 +32,25 @@ export type PersistedLine = {
   fingerprint: string;
 };
 
+export type LineRecord = {
+  id: string;
+  claimId: string;
+  serviceCode: string;
+  billedCents: number;
+  units: number;
+  priorAuthPresent: boolean;
+  status: LineItemStatus;
+  fingerprint: string;
+};
+
+export type ClaimRecord = {
+  id: string;
+  memberId: string;
+  policyId: string;
+  serviceDate: string;
+  status: ClaimStatus;
+};
+
 export function createClaimRepository(db: Db) {
   return {
     db,
@@ -85,6 +104,33 @@ export function createClaimRepository(db: Db) {
 
     setClaimStatus(claimId: string, status: ClaimStatus): void {
       db.update(claims).set({ status }).where(eq(claims.id, claimId)).run();
+    },
+
+    findLineById(id: string): LineRecord | undefined {
+      const row = db.select().from(lineItems).where(eq(lineItems.id, id)).get();
+      if (!row) return undefined;
+      return {
+        id: row.id,
+        claimId: row.claimId,
+        serviceCode: row.serviceCode,
+        billedCents: row.billedCents,
+        units: row.units,
+        priorAuthPresent: row.priorAuthPresent,
+        status: row.status,
+        fingerprint: row.fingerprint,
+      };
+    },
+
+    findClaimById(id: string): ClaimRecord | undefined {
+      const row = db.select().from(claims).where(eq(claims.id, id)).get();
+      if (!row) return undefined;
+      return {
+        id: row.id,
+        memberId: row.memberId,
+        policyId: row.policyId,
+        serviceDate: row.serviceDate,
+        status: row.status,
+      };
     },
   };
 }

@@ -1,8 +1,8 @@
 // app/src/repositories/adjudication.repository.ts — append-only adjudication persistence.
 // Only ever INSERTs — append-only is enforced by triggers in schema.sql.
 
-
 import { randomUUID } from "node:crypto";
+import { desc, eq } from "drizzle-orm";
 import type { Db } from "../db/connection";
 import { adjudications } from "../db/schema";
 import type { ReasonCode } from "../domain/reason-codes";
@@ -20,9 +20,20 @@ export type NewAdjudication = {
   deltas: { deductibleIncCents: number; oopIncCents: number; limitInc: number };
 };
 
+export type CurrentAdjudication = {
+  id: string;
+  seq: number;
+  status: "APPROVED" | "DENIED";
+  payableCents: number;
+  memberResponsibilityCents: number;
+  reasons: ReasonCode[];
+  deltas: { deductibleIncCents: number; oopIncCents: number; limitInc: number };
+};
+
 export function createAdjudicationRepository(db: Db) {
   return {
     db,
+
     append(a: NewAdjudication): string {
       const id = randomUUID();
       db.insert(adjudications)
@@ -43,6 +54,31 @@ export function createAdjudicationRepository(db: Db) {
         })
         .run();
       return id;
+    },
+
+    // The current (latest seq) decision for a line — the one a dispute challenges.
+    currentForLine(lineItemId: string): CurrentAdjudication | undefined {
+      const row = db
+        .select()
+        .from(adjudications)
+        .where(eq(adjudications.lineItemId, lineItemId))
+        .orderBy(desc(adjudications.seq))
+        .limit(1)
+        .get();
+      if (!row) return undefined;
+      return {
+        id: row.id,
+        seq: row.seq,
+        status: row.status,
+        payableCents: row.payableCents,
+        memberResponsibilityCents: row.memberResponsibilityCents,
+        reasons: row.reasonsJson,
+        deltas: {
+          deductibleIncCents: row.deltaDeductibleIncCents,
+          oopIncCents: row.deltaOopIncCents,
+          limitInc: row.deltaLimitInc,
+        },
+      };
     },
   };
 }
