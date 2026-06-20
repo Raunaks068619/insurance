@@ -510,6 +510,6 @@ docs/
   decisions.md     21 numbered decisions with rationale
   self-review.md   honest gap-list
 
-ai-artifacts/      raw JSONL session logs (01-framing through 07-qa)
+ai-artifacts/      raw JSONL session logs — 35 Claude Code sessions, unedited
 project-docs/      original assignment brief (do not edit)
 ```
