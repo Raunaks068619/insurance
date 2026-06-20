@@ -9,11 +9,11 @@ Built for the Realfast FDE Level-1 take-home.
 
 ## Prerequisites
 
-| Tool | Version | Install |
+| Tool | Version | Note |
 |---|---|---|
-| Node.js | 22+ | https://nodejs.org |
-| pnpm | any | `npm install -g pnpm` |
-| jq | any | `brew install jq` (for formatting curl output) |
+| Node.js | 22+ | https://nodejs.org — required |
+| pnpm | any | `start.sh` installs it automatically if missing |
+| jq | any | `brew install jq` — only needed for formatting curl output |
 
 SQLite is **embedded** — no database server needed.
 
@@ -67,7 +67,7 @@ only via explicit accessors (`findClaimPhi`, `findMemberById`).
 | Domain model | [`docs/domain-model.md`](docs/domain-model.md) — entities, state machines, worked numeric examples |
 | Decisions | [`docs/decisions.md`](docs/decisions.md) — 29 numbered decisions with rationale and trade-offs |
 | Self-review | [`docs/self-review.md`](docs/self-review.md) — honest gap-list, confidence calibration |
-| Working system | `pnpm install && pnpm start` — auto-seeds, starts on `:3000` |
+| Working system | `./start.sh` — checks Node, installs deps, auto-seeds, starts on `:3000` |
 | Tests | `pnpm test` — 79 tests, all encoding domain behavior |
 
 ---
