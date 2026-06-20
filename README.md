@@ -29,7 +29,7 @@ pnpm start     # seeds the DB automatically, then starts the API on http://local
 That's it. `pnpm start` runs the seed on every boot (idempotent — safe to restart).
 
 ```bash
-pnpm test      # run the full test suite (73 tests, all domain behavior)
+pnpm test      # run the full test suite (79 tests, all domain behavior)
 ```
 
 ### PHI encryption (optional config)
