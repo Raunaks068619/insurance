@@ -21,12 +21,20 @@ SQLite is **embedded** — no database server needed.
 
 ## Setup
 
+**One command:**
+
+```bash
+./start.sh
+```
+
+[`start.sh`](start.sh) checks Node 22+, installs pnpm if missing, installs dependencies, and starts the server. The DB seeds automatically on boot.
+
+Or manually:
+
 ```bash
 pnpm install   # install dependencies
 pnpm start     # seeds the DB automatically, then starts the API on http://localhost:3000
 ```
-
-That's it. `pnpm start` runs the seed on every boot (idempotent — safe to restart).
 
 ```bash
 pnpm test      # run the full test suite (79 tests, all domain behavior)
