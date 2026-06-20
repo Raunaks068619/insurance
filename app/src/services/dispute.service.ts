@@ -10,8 +10,8 @@
 // full guard set (36) arrive in their cycles.
 
 import { adjudicateLine } from "../domain/adjudication/adjudicator";
-import { aggregateClaimStatus } from "../domain/state-machines/claim-state";
 import type { ReasonCode } from "../domain/reason-codes";
+import { aggregateClaimStatus } from "../domain/state-machines/claim-state";
 import type { AccumulatorRepository } from "../repositories/accumulator.repository";
 import type { AdjudicationRepository } from "../repositories/adjudication.repository";
 import type { ClaimRepository } from "../repositories/claim.repository";
@@ -48,12 +48,18 @@ export type OpenDisputeResult = {
   resolvedAdjudicationId: string;
 };
 
-type Decision = { status: "APPROVED" | "DENIED"; payableCents: number; reasons: ReasonCode[] };
+type Decision = {
+  status: "APPROVED" | "DENIED";
+  payableCents: number;
+  reasons: ReasonCode[];
+};
 
 // Diff the new decision against the original (decision #16 outcome taxonomy).
 function diffOutcome(original: Decision, next: Decision): DisputeOutcome {
   if (original.status === "DENIED" && next.status === "APPROVED") {
-    return next.reasons.includes("LIMIT_EXCEEDED") ? "PARTIALLY_OVERTURNED" : "OVERTURNED";
+    return next.reasons.includes("LIMIT_EXCEEDED")
+      ? "PARTIALLY_OVERTURNED"
+      : "OVERTURNED";
   }
   const unchanged =
     original.status === next.status &&
@@ -68,17 +74,27 @@ export function createDisputeService(deps: DisputeServiceDeps) {
       const line = deps.claims.findLineById(input.lineItemId);
       if (!line) throw new Error(`line item not found: ${input.lineItemId}`);
       const original = deps.adjudications.currentForLine(input.lineItemId);
-      if (!original) throw new Error(`no adjudication to dispute for line ${input.lineItemId}`);
+      if (!original)
+        throw new Error(
+          `no adjudication to dispute for line ${input.lineItemId}`,
+        );
 
       const claim = deps.claims.findClaimById(line.claimId);
       if (!claim) throw new Error(`claim not found: ${line.claimId}`);
-      const policy = deps.policies.findActiveForMember(claim.memberId, claim.serviceDate);
+      const policy = deps.policies.findActiveForMember(
+        claim.memberId,
+        claim.serviceDate,
+      );
       if (!policy) {
-        throw new Error(`no active policy for member ${claim.memberId} on ${claim.serviceDate}`);
+        throw new Error(
+          `no active policy for member ${claim.memberId} on ${claim.serviceDate}`,
+        );
       }
       const planYear = String(policy.planYear);
       const ruleByService = new Map(
-        deps.coverageRules.findByPolicy(policy.id).map((r) => [r.serviceCode, r]),
+        deps.coverageRules
+          .findByPolicy(policy.id)
+          .map((r) => [r.serviceCode, r]),
       );
 
       // Reopen: the terminal line moves to NEEDS_REVIEW, initiated by the MEMBER.
@@ -146,7 +162,9 @@ export function createDisputeService(deps: DisputeServiceDeps) {
       });
 
       // Re-aggregate the claim from every line's current decision.
-      const claimStatus = aggregateClaimStatus(deps.adjudications.currentOutcomesByClaim(claim.id));
+      const claimStatus = aggregateClaimStatus(
+        deps.adjudications.currentOutcomesByClaim(claim.id),
+      );
       deps.setStatus({
         claimId: claim.id,
         target: { type: "CLAIM", status: claimStatus },
@@ -161,7 +179,11 @@ export function createDisputeService(deps: DisputeServiceDeps) {
           payableCents: original.payableCents,
           reasons: original.reasons,
         },
-        { status: newStatus, payableCents: result.payableCents, reasons: result.reasons },
+        {
+          status: newStatus,
+          payableCents: result.payableCents,
+          reasons: result.reasons,
+        },
       );
 
       const disputeId = deps.disputes.insertResolved({

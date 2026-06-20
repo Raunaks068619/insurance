@@ -21,7 +21,8 @@ export function aggregateClaimStatus(lines: LineOutcome[]): ClaimStatus {
 
   const anyDenied = lines.some((line) => line.status === "DENIED");
   const anyStraddled = lines.some(
-    (line) => line.status === "APPROVED" && line.reasons.includes("LIMIT_EXCEEDED"),
+    (line) =>
+      line.status === "APPROVED" && line.reasons.includes("LIMIT_EXCEEDED"),
   );
   if (anyDenied || anyStraddled) return "PARTIALLY_APPROVED";
 

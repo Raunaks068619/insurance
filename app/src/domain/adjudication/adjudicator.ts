@@ -33,13 +33,18 @@ export type AdjudicateLineResult = {
   deltas: { deductibleIncCents: number; oopIncCents: number; limitInc: number };
 };
 
-export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult {
+export function adjudicateLine(
+  input: AdjudicateLineInput,
+): AdjudicateLineResult {
   const { rule, line, policy, serviceDate, acc, alreadyAdjudicated } = input;
 
   // Every gate denial shares one shape: plan pays nothing, member owes nothing here
   // (a non-covered service is billed to the member directly, not as cost-share), and
   // no accumulator is touched. A denial is a processed decision, never an error.
-  const deny = (reason: ReasonCode, explanation: string): AdjudicateLineResult => ({
+  const deny = (
+    reason: ReasonCode,
+    explanation: string,
+  ): AdjudicateLineResult => ({
     status: "DENIED",
     payableCents: 0,
     memberResponsibilityCents: 0,
@@ -59,7 +64,10 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
   }
 
   // Cycle 5 — service date outside the policy's active window. ISO dates compare lexically.
-  if (serviceDate < policy.effectiveDate || serviceDate > policy.terminationDate) {
+  if (
+    serviceDate < policy.effectiveDate ||
+    serviceDate > policy.terminationDate
+  ) {
     return deny(
       ReasonCode.POLICY_NOT_ACTIVE,
       `Policy not active: ${serviceDate} is outside the coverage window (${policy.effectiveDate}–${policy.terminationDate}); the plan pays ${formatUsd(0)}.`,
@@ -108,7 +116,10 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
 
   // Dollar limit fully exhausted (no remaining at all) → denial. A *partial* remaining is
   // handled after cost-share as a straddle (cycle 17), where the line stays APPROVED.
-  if (rule.limit.unit === "dollars" && acc.limitUsed >= rule.limit.amountCents) {
+  if (
+    rule.limit.unit === "dollars" &&
+    acc.limitUsed >= rule.limit.amountCents
+  ) {
     return deny(
       ReasonCode.LIMIT_EXCEEDED,
       `Limit exceeded: ${line.serviceCode} has reached its ${formatUsd(rule.limit.amountCents)} annual limit; the plan pays ${formatUsd(0)}.`,
@@ -147,7 +158,10 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     // member pays `rate` of the remainder. Rounding lives only on the coinsurance share; `plan`
     // is computed last as `allowed − member`, so the shares always sum to allowed (no lost cent).
     const allowedCents = line.billedCents;
-    const remainingDeductibleCents = Math.max(0, policy.deductibleCents - acc.deductibleMetCents);
+    const remainingDeductibleCents = Math.max(
+      0,
+      policy.deductibleCents - acc.deductibleMetCents,
+    );
     const dedPortionCents = rule.appliesDeductible
       ? Math.min(remainingDeductibleCents, allowedCents)
       : 0;
@@ -161,14 +175,21 @@ export function adjudicateLine(input: AdjudicateLineInput): AdjudicateLineResult
     reasons.push(ReasonCode.COINSURANCE_APPLIED);
 
     const ratePct = Math.round(rule.costShare.rate * 100);
-    const dedNote = dedPortionCents > 0 ? `${formatUsd(dedPortionCents)} toward your deductible plus ` : "";
+    const dedNote =
+      dedPortionCents > 0
+        ? `${formatUsd(dedPortionCents)} toward your deductible plus `
+        : "";
     result = {
       status: "APPROVED",
       payableCents: planCents,
       memberResponsibilityCents: memberCents,
       reasons,
       explanation: `Coinsurance: you pay ${formatUsd(memberCents)} (${dedNote}${ratePct}% of ${formatUsd(remainderCents)}); the plan pays ${formatUsd(planCents)}.`,
-      deltas: { deductibleIncCents: dedPortionCents, oopIncCents: memberCents, limitInc: 0 },
+      deltas: {
+        deductibleIncCents: dedPortionCents,
+        oopIncCents: memberCents,
+        limitInc: 0,
+      },
     };
   }
 

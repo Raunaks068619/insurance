@@ -7,7 +7,10 @@
 
 import { adjudicateLine } from "../domain/adjudication/adjudicator";
 import type { ClaimStatus } from "../domain/entities/claim";
-import { type LineOutcome, aggregateClaimStatus } from "../domain/state-machines/claim-state";
+import {
+  type LineOutcome,
+  aggregateClaimStatus,
+} from "../domain/state-machines/claim-state";
 import type { AccumulatorRepository } from "../repositories/accumulator.repository";
 import type { AdjudicationRepository } from "../repositories/adjudication.repository";
 import type { ClaimRepository } from "../repositories/claim.repository";
@@ -43,13 +46,20 @@ export type AdjudicateClaimResult = { claimId: string; status: ClaimStatus };
 export function createClaimService(deps: ClaimServiceDeps) {
   function adjudicateClaim(input: AdjudicateClaimInput): AdjudicateClaimResult {
     return deps.withTransaction(() => {
-      const policy = deps.policies.findActiveForMember(input.memberId, input.serviceDate);
+      const policy = deps.policies.findActiveForMember(
+        input.memberId,
+        input.serviceDate,
+      );
       if (!policy) {
-        throw new Error(`no active policy for member ${input.memberId} on ${input.serviceDate}`);
+        throw new Error(
+          `no active policy for member ${input.memberId} on ${input.serviceDate}`,
+        );
       }
       const planYear = String(policy.planYear);
       const ruleByService = new Map(
-        deps.coverageRules.findByPolicy(policy.id).map((r) => [r.serviceCode, r]),
+        deps.coverageRules
+          .findByPolicy(policy.id)
+          .map((r) => [r.serviceCode, r]),
       );
 
       const claimId = deps.claims.insertClaim({
@@ -90,7 +100,11 @@ export function createClaimService(deps: ClaimServiceDeps) {
       // Phase 2 — adjudicate each line in order. One snapshot at claim start; deltas are applied to
       // this working copy between lines so a later line sees an earlier line's draw (determinism).
       const acc = deps.accumulators.snapshot(input.memberId, planYear);
-      const touched = { deductible: false, oop: false, limits: new Set<string>() };
+      const touched = {
+        deductible: false,
+        oop: false,
+        limits: new Set<string>(),
+      };
       const outcomes: LineOutcome[] = [];
 
       for (const { line, fingerprint } of submitted) {
@@ -148,7 +162,8 @@ export function createClaimService(deps: ClaimServiceDeps) {
         }
         if (result.deltas.limitInc > 0) {
           acc.limitUsedByService[line.serviceCode] =
-            (acc.limitUsedByService[line.serviceCode] ?? 0) + result.deltas.limitInc;
+            (acc.limitUsedByService[line.serviceCode] ?? 0) +
+            result.deltas.limitInc;
           touched.limits.add(line.serviceCode);
         }
 

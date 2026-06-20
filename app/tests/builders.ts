@@ -2,11 +2,11 @@
 // integer-cents object; a test overrides only the field(s) it asserts on, so the
 // load-bearing fact of each test stands out and the rest recedes. No `any`.
 
-import type { CoverageRule, LineItem, Policy } from "../src/domain/types";
 import type {
   AccumulatorSnapshot,
   AdjudicateLineInput,
 } from "../src/domain/adjudication/adjudicator";
+import type { CoverageRule, LineItem, Policy } from "../src/domain/types";
 
 export const aPolicy = (overrides: Partial<Policy> = {}): Policy => ({
   id: "pol_test_1",
@@ -19,7 +19,9 @@ export const aPolicy = (overrides: Partial<Policy> = {}): Policy => ({
   ...overrides,
 });
 
-export const aCoverageRule = (overrides: Partial<CoverageRule> = {}): CoverageRule => ({
+export const aCoverageRule = (
+  overrides: Partial<CoverageRule> = {},
+): CoverageRule => ({
   policyId: "pol_test_1",
   serviceCode: "PREVENTIVE",
   covered: true,

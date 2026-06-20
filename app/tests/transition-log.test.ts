@@ -15,7 +15,9 @@ describe("setStatus — chokepoint appends a transition row (cycle 28)", () => {
   it("appends a CLAIM transition with from=null on create, sets the column, and bumps seq", () => {
     const { db, sqlite } = freshDb();
     const { memberId, policyId } = seedWorld(db, {
-      rules: [{ serviceCode: "PREVENTIVE", costShare: { type: "full_coverage" } }],
+      rules: [
+        { serviceCode: "PREVENTIVE", costShare: { type: "full_coverage" } },
+      ],
     });
     const claimId = createClaimRepository(db).insertClaim({
       memberId,
@@ -32,7 +34,9 @@ describe("setStatus — chokepoint appends a transition row (cycle 28)", () => {
     });
 
     const rows = sqlite
-      .prepare("SELECT * FROM status_transitions WHERE claim_id = ? ORDER BY seq")
+      .prepare(
+        "SELECT * FROM status_transitions WHERE claim_id = ? ORDER BY seq",
+      )
       .all(claimId) as Record<string, unknown>[];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
@@ -58,7 +62,10 @@ describe("adjudicateClaim — logs the ordered submit→adjudicate→aggregate s
     const { memberId } = seedWorld(db, {
       rules: [
         { serviceCode: "PREVENTIVE", costShare: { type: "full_coverage" } },
-        { serviceCode: "PCP_VISIT", costShare: { type: "copay", copayCents: 2_500 } },
+        {
+          serviceCode: "PCP_VISIT",
+          costShare: { type: "copay", copayCents: 2_500 },
+        },
       ],
     });
     makeClaimService({ db, sqlite }).adjudicateClaim({
@@ -75,8 +82,15 @@ describe("adjudicateClaim — logs the ordered submit→adjudicate→aggregate s
   it("records claim SUBMIT, two line SUBMITs, two line ADJUDICATEDs, claim AGGREGATED in seq order", () => {
     const sqlite = adjudicateTwoLine();
     const rows = sqlite
-      .prepare("SELECT entity_type, reason, to_status, seq FROM status_transitions ORDER BY seq")
-      .all() as { entity_type: string; reason: string; to_status: string; seq: number }[];
+      .prepare(
+        "SELECT entity_type, reason, to_status, seq FROM status_transitions ORDER BY seq",
+      )
+      .all() as {
+      entity_type: string;
+      reason: string;
+      to_status: string;
+      seq: number;
+    }[];
 
     expect(rows.map((r) => [r.entity_type, r.reason])).toEqual([
       ["CLAIM", "SUBMIT"],
@@ -87,7 +101,10 @@ describe("adjudicateClaim — logs the ordered submit→adjudicate→aggregate s
       ["CLAIM", "AGGREGATED"],
     ]);
     expect(rows.map((r) => r.seq)).toEqual([1, 2, 3, 4, 5, 6]); // one monotonic clock per claim
-    expect(rows.at(-1)).toMatchObject({ reason: "AGGREGATED", to_status: "APPROVED" });
+    expect(rows.at(-1)).toMatchObject({
+      reason: "AGGREGATED",
+      to_status: "APPROVED",
+    });
   });
 });
 
@@ -99,7 +116,10 @@ describe("adjudicateClaim — re-run yields identical transition rows (cycle 30)
       const { memberId } = seedWorld(db, {
         rules: [
           { serviceCode: "PREVENTIVE", costShare: { type: "full_coverage" } },
-          { serviceCode: "PCP_VISIT", costShare: { type: "copay", copayCents: 2_500 } },
+          {
+            serviceCode: "PCP_VISIT",
+            costShare: { type: "copay", copayCents: 2_500 },
+          },
         ],
       });
       makeClaimService({ db, sqlite }).adjudicateClaim({
@@ -110,7 +130,9 @@ describe("adjudicateClaim — re-run yields identical transition rows (cycle 30)
           { serviceCode: "PCP_VISIT", billedCents: 18_000 },
         ],
       });
-      return sqlite.prepare(`SELECT ${cols} FROM status_transitions ORDER BY seq`).all();
+      return sqlite
+        .prepare(`SELECT ${cols} FROM status_transitions ORDER BY seq`)
+        .all();
     };
     expect(run()).toEqual(run());
   });
@@ -132,9 +154,13 @@ describe("disputeService.open — logs the reopen + re-adjudication (cycle 31)",
     makeClaimService({ db, sqlite }).adjudicateClaim({
       memberId,
       serviceDate: "2026-06-19",
-      lineItems: [{ serviceCode: "MRI", billedCents: 90_000, priorAuthPresent: false }],
+      lineItems: [
+        { serviceCode: "MRI", billedCents: 90_000, priorAuthPresent: false },
+      ],
     });
-    const lineItemId = (sqlite.prepare("SELECT id FROM line_items").get() as { id: string }).id;
+    const lineItemId = (
+      sqlite.prepare("SELECT id FROM line_items").get() as { id: string }
+    ).id;
     makeDisputeService({ db, sqlite }).open({
       lineItemId,
       reason: "auth on file",
@@ -145,7 +171,12 @@ describe("disputeService.open — logs the reopen + re-adjudication (cycle 31)",
       .prepare(
         "SELECT from_status, to_status, actor, reason FROM status_transitions WHERE entity_type = 'LINE_ITEM' ORDER BY seq",
       )
-      .all() as { from_status: string; to_status: string; actor: string; reason: string }[];
+      .all() as {
+      from_status: string;
+      to_status: string;
+      actor: string;
+      reason: string;
+    }[];
 
     // the dispute reopen: terminal DENIED → NEEDS_REVIEW, by the MEMBER
     const reopenIdx = lineRows.findIndex((r) => r.reason === "DISPUTE_REOPEN");

@@ -114,7 +114,10 @@ export function createClaimRepository(db: Db) {
         .where(eq(claims.id, claimId))
         .get();
       const next = (row?.seq ?? 0) + 1;
-      db.update(claims).set({ claimSeq: next }).where(eq(claims.id, claimId)).run();
+      db.update(claims)
+        .set({ claimSeq: next })
+        .where(eq(claims.id, claimId))
+        .run();
       return next;
     },
 

@@ -4,8 +4,8 @@
 import { randomUUID } from "node:crypto";
 import { desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/connection";
-import type { ReasonCode } from "../domain/reason-codes";
 import { adjudications } from "../db/schema";
+import type { ReasonCode } from "../domain/reason-codes";
 
 export type NewAdjudication = {
   lineItemId: string;
@@ -85,7 +85,10 @@ export function createAdjudicationRepository(db: Db) {
     currentOutcomesByClaim(
       claimId: string,
     ): { status: "APPROVED" | "DENIED"; reasons: ReasonCode[] }[] {
-      const rows = db.all<{ status: "APPROVED" | "DENIED"; reasons_json: string }>(sql`
+      const rows = db.all<{
+        status: "APPROVED" | "DENIED";
+        reasons_json: string;
+      }>(sql`
         SELECT a.status AS status, a.reasons_json AS reasons_json
         FROM line_items li
         JOIN adjudications a ON a.line_item_id = li.id
@@ -100,4 +103,6 @@ export function createAdjudicationRepository(db: Db) {
   };
 }
 
-export type AdjudicationRepository = ReturnType<typeof createAdjudicationRepository>;
+export type AdjudicationRepository = ReturnType<
+  typeof createAdjudicationRepository
+>;

@@ -6,7 +6,11 @@ import type { Db } from "../db/connection";
 import { statusTransitions } from "../db/schema";
 
 export type TransitionActor = "SYSTEM" | "MEMBER";
-export type TransitionReason = "SUBMIT" | "ADJUDICATED" | "AGGREGATED" | "DISPUTE_REOPEN";
+export type TransitionReason =
+  | "SUBMIT"
+  | "ADJUDICATED"
+  | "AGGREGATED"
+  | "DISPUTE_REOPEN";
 
 export type NewTransition = {
   entityType: "CLAIM" | "LINE_ITEM";
