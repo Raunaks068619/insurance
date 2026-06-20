@@ -50,6 +50,30 @@ describe("GET /claims/:id — fetch a claim snapshot", () => {
     expect(body.timeline.at(-1).toStatus).toBe("PARTIALLY_APPROVED");
   });
 
+  it("lineItems carry per-line EOB fields (reasons, explanation, payable, member owed)", async () => {
+    const { app, memberId } = appWithSeed();
+    const claimId = (await submitClaim(app, memberId)).json().id;
+
+    const res = await app.inject({ method: "GET", url: `/claims/${claimId}` });
+    const { lineItems } = res.json();
+
+    const preventive = lineItems.find(
+      (l: { serviceCode: string }) => l.serviceCode === "PREVENTIVE",
+    );
+    expect(preventive.reasons).toContain("APPROVED");
+    expect(preventive.explanation).toMatch(/plan pays 100%/i);
+    expect(preventive.payableCents).toBe(12_000);
+    expect(preventive.memberResponsibilityCents).toBe(0);
+
+    const dental = lineItems.find(
+      (l: { serviceCode: string }) => l.serviceCode === "ADULT_DENTAL",
+    );
+    expect(dental.reasons).toContain("EXCLUDED");
+    expect(dental.payableCents).toBe(0);
+    expect(typeof dental.explanation).toBe("string");
+    expect(dental.explanation.length).toBeGreaterThan(0);
+  });
+
   it("returns 404 with a not-found code for an unknown claim id", async () => {
     const { app } = appWithSeed();
 

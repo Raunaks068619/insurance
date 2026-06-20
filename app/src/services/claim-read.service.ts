@@ -16,7 +16,7 @@ import type {
   TransitionRecord,
 } from "../repositories/status-transition.repository";
 
-export type ClaimSnapshot = {
+export type ClaimResponse = {
   id: string;
   memberId: string;
   serviceDate: string;
@@ -26,7 +26,7 @@ export type ClaimSnapshot = {
   timeline: TransitionRecord[];
 };
 
-// The EOB view: per line, the reason code(s), the explanation sentence, and the numbers used.
+// Internal EOB view used by dispute resolution and future internal consumers.
 export type ClaimExplanation = {
   claimId: string;
   lineItems: ClaimAdjudicationLine[];
@@ -39,7 +39,7 @@ export type ClaimReadServiceDeps = {
 };
 
 export function createClaimReadService(deps: ClaimReadServiceDeps) {
-  function getClaimById(id: string): ClaimSnapshot | undefined {
+  function getClaimById(id: string): ClaimResponse | undefined {
     const claim = deps.claims.findClaimById(id);
     if (!claim) return undefined;
 
@@ -61,7 +61,7 @@ export function createClaimReadService(deps: ClaimReadServiceDeps) {
     };
   }
 
-  // The per-line EOB for GET /claims/:id/explanation — undefined when no such claim exists.
+  // Internal EOB helper — undefined when no such claim exists.
   function getExplanation(id: string): ClaimExplanation | undefined {
     if (!deps.claims.findClaimById(id)) return undefined;
     return { claimId: id, lineItems: deps.adjudications.byClaimId(id) };

@@ -31,9 +31,6 @@ export function registerClaimRoutes(
   // GET /claims/:id — fetch a claim snapshot (status, lines, payable sum, timeline)
   app.get("/claims/:id", claims.getById);
 
-  // GET /claims/:id/explanation — the per-line EOB
-  app.get("/claims/:id/explanation", claims.explanation);
-
   // POST /claims/:id/line-items/:lid/dispute — dispute one line's decision
   app.post(
     "/claims/:id/line-items/:lid/dispute",
