@@ -69,6 +69,24 @@ export function createAdjudicationRepository(db: Db) {
       return id;
     },
 
+    // Has any OTHER line item sharing this fingerprint already been adjudicated?
+    // Drives the DUPLICATE_LINE_ITEM gate: a resubmitted identical line is denied. The
+    // adjudications JOIN is what makes within-claim batches correct — sibling lines exist as
+    // rows before adjudication starts, so only ones already DECIDED count as a prior.
+    existsForFingerprint(
+      fingerprint: string,
+      excludeLineItemId: string,
+    ): boolean {
+      const row = db.get<{ n: number }>(sql`
+        SELECT COUNT(*) AS n
+        FROM adjudications a
+        JOIN line_items li ON li.id = a.line_item_id
+        WHERE li.fingerprint = ${fingerprint}
+          AND li.id != ${excludeLineItemId}
+      `);
+      return (row?.n ?? 0) > 0;
+    },
+
     // The current (latest seq) decision for a line — the one a dispute challenges.
     currentForLine(lineItemId: string): CurrentAdjudication | undefined {
       const row = db

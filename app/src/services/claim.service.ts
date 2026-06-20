@@ -142,7 +142,12 @@ export function createClaimService(deps: ClaimServiceDeps) {
             oopMetCents: acc.oopMetCents,
             limitUsed: acc.limitUsedByService[line.serviceCode] ?? 0,
           },
-          alreadyAdjudicated: false,
+          // Duplicate when another already-decided line shares this fingerprint — across a
+          // prior claim or an earlier line in this same batch (see existsForFingerprint).
+          alreadyAdjudicated: deps.adjudications.existsForFingerprint(
+            fingerprint,
+            line.id,
+          ),
         });
 
         // adjudicateLine only ever decides APPROVED | DENIED (never PENDING/NEEDS_REVIEW)
