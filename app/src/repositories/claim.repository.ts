@@ -3,6 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import type { Db } from "../db/connection";
+import { decryptPhiNullable, encryptPhiNullable } from "../db/phi-crypto";
 import { claims, lineItems } from "../db/schema";
 import type { ClaimStatus } from "../domain/entities/claim";
 import type { LineItemStatus } from "../domain/entities/line-item";
@@ -51,6 +52,12 @@ export type ClaimRecord = {
   status: ClaimStatus;
 };
 
+// Decrypted PHI for a claim — kept off ClaimRecord so the common read path never touches PHI.
+export type ClaimPhi = {
+  provider: string | null;
+  diagnosisCode: string | null;
+};
+
 export function createClaimRepository(db: Db) {
   return {
     db,
@@ -63,8 +70,9 @@ export function createClaimRepository(db: Db) {
           memberId: c.memberId,
           policyId: c.policyId,
           serviceDate: c.serviceDate,
-          provider: c.provider ?? null,
-          diagnosisCode: c.diagnosisCode ?? null,
+          // provider/diagnosis_code are PHI — encrypted at rest (null stays null).
+          provider: encryptPhiNullable(c.provider),
+          diagnosisCode: encryptPhiNullable(c.diagnosisCode),
         })
         .run();
       return id;
@@ -145,6 +153,24 @@ export function createClaimRepository(db: Db) {
         policyId: row.policyId,
         serviceDate: row.serviceDate,
         status: row.status,
+      };
+    },
+
+    // Decrypt a claim's PHI (provider/diagnosis). Separate from findClaimById so PHI is read only
+    // when explicitly needed — never on the hot adjudication/read path.
+    findClaimPhi(id: string): ClaimPhi | undefined {
+      const row = db
+        .select({
+          provider: claims.provider,
+          diagnosisCode: claims.diagnosisCode,
+        })
+        .from(claims)
+        .where(eq(claims.id, id))
+        .get();
+      if (!row) return undefined;
+      return {
+        provider: decryptPhiNullable(row.provider),
+        diagnosisCode: decryptPhiNullable(row.diagnosisCode),
       };
     },
   };

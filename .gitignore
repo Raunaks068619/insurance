@@ -13,3 +13,6 @@ node_modules/
 coverage/
 dist/
 *.tsbuildinfo
+
+# Secrets — real PHI encryption key lives here, never commit it (.env.example is the template)
+.env

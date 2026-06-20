@@ -7,13 +7,14 @@
 import { type AppDeps, buildApp } from "../src/app";
 import { type Db, type DbHandle, createDb } from "../src/db/connection";
 import { applySchema } from "../src/db/migrate";
-import { coverageRules, members, policies } from "../src/db/schema";
+import { coverageRules, policies } from "../src/db/schema";
 import type { CoverageRule } from "../src/domain/types";
 import { createAccumulatorRepository } from "../src/repositories/accumulator.repository";
 import { createAdjudicationRepository } from "../src/repositories/adjudication.repository";
 import { createClaimRepository } from "../src/repositories/claim.repository";
 import { createCoverageRuleRepository } from "../src/repositories/coverage-rule.repository";
 import { createDisputeRepository } from "../src/repositories/dispute.repository";
+import { createMemberRepository } from "../src/repositories/member.repository";
 import { createPolicyRepository } from "../src/repositories/policy.repository";
 import { createStatusTransitionRepository } from "../src/repositories/status-transition.repository";
 import { createClaimReadService } from "../src/services/claim-read.service";
@@ -114,9 +115,11 @@ export function seedWorld(
   const policyId = "pol_seed_1";
   const planYear = "2026";
 
-  db.insert(members)
-    .values({ id: memberId, name: "Jane Doe", dob: "1990-05-01" })
-    .run();
+  createMemberRepository(db).insertMember({
+    id: memberId,
+    name: "Jane Doe",
+    dob: "1990-05-01",
+  });
   db.insert(policies)
     .values({
       id: policyId,

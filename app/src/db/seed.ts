@@ -27,15 +27,11 @@
 // └───────────────────┴──────────────────────────────────────────────┴─────────────────────────┘
 
 import { eq } from "drizzle-orm";
+import type { CoverageRule } from "../domain/types";
+import { createMemberRepository } from "../repositories/member.repository";
 import { type Db, createDb } from "./connection";
 import { applySchema } from "./migrate";
-import {
-  accumulators,
-  coverageRules,
-  members,
-  policies,
-} from "./schema";
-import type { CoverageRule } from "../domain/types";
+import { accumulators, coverageRules, members, policies } from "./schema";
 
 type SeedRule = Partial<CoverageRule> & { serviceCode: string };
 
@@ -83,7 +79,11 @@ const SEED_MEMBERS: SeedMember[] = [
     name: "Alice Approved",
     dob: "1988-03-12",
     rules: [
-      { serviceCode: "PCP_VISIT", costShare: copay(2_500), appliesDeductible: true },
+      {
+        serviceCode: "PCP_VISIT",
+        costShare: copay(2_500),
+        appliesDeductible: true,
+      },
       { serviceCode: "PREVENTIVE", costShare: FULL },
     ],
   },
@@ -184,7 +184,11 @@ const SEED_MEMBERS: SeedMember[] = [
     name: "Pat Partial",
     dob: "1995-08-14",
     rules: [
-      { serviceCode: "PCP_VISIT", costShare: copay(2_500), appliesDeductible: true },
+      {
+        serviceCode: "PCP_VISIT",
+        costShare: copay(2_500),
+        appliesDeductible: true,
+      },
       { serviceCode: "PREVENTIVE", costShare: FULL },
       { serviceCode: "ADULT_DENTAL", covered: false, excluded: true },
     ],
@@ -205,7 +209,12 @@ function seedMember(db: Db, m: SeedMember): boolean {
   const exists = db.select().from(members).where(eq(members.id, m.id)).all();
   if (exists.length > 0) return false;
 
-  db.insert(members).values({ id: m.id, name: m.name, dob: m.dob }).run();
+  // name/dob are PHI — inserted via the member repo so they are encrypted at rest.
+  createMemberRepository(db).insertMember({
+    id: m.id,
+    name: m.name,
+    dob: m.dob,
+  });
 
   if (!m.policy && !m.rules && !m.accumulators) return true; // no-policy case
 
@@ -286,5 +295,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
         : ""),
   );
   console.log("  inserted:", result.seeded.join(", ") || "(none)");
-  if (result.skipped.length) console.log("  skipped: ", result.skipped.join(", "));
+  if (result.skipped.length)
+    console.log("  skipped: ", result.skipped.join(", "));
 }

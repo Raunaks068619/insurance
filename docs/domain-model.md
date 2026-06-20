@@ -66,7 +66,9 @@ type LineItem = {
 policy; an unlisted code is accepted at intake and denied `NO_COVERAGE` at adjudication.
 
 **PHI:** `Member.name`/`dob`, `Claim.provider`/`diagnosisCode` are sensitive — minimized,
-separated from adjudication data, encryption-at-rest candidates. The engine never reads them.
+separated from adjudication data, and **encrypted at rest** (AES-256-GCM app-level field
+encryption, `app/src/db/phi-crypto.ts`; encrypt on write / decrypt on read at the repository
+seam). The engine never reads them.
 
 ### Intake (C2, N1–N5)
 

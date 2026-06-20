@@ -29,8 +29,23 @@ pnpm start     # seeds the DB automatically, then starts the API on http://local
 That's it. `pnpm start` runs the seed on every boot (idempotent — safe to restart).
 
 ```bash
-pnpm test      # run the full test suite (62 tests, all domain behavior)
+pnpm test      # run the full test suite (73 tests, all domain behavior)
 ```
+
+### PHI encryption (optional config)
+
+The four PHI columns (`members.name`/`dob`, `claims.provider`/`diagnosis_code`) are **encrypted at
+rest** with AES-256-GCM ([`app/src/db/phi-crypto.ts`](app/src/db/phi-crypto.ts)). The 32-byte key
+comes from `PHI_ENCRYPTION_KEY` in `.env`:
+
+```bash
+cp .env.example .env   # ready-to-use DEV key; or generate your own:
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+If `.env` is absent the app falls back to a documented DEV key so the demo still runs — **never use
+that default for real PHI.** The adjudication engine never reads these columns; they're decrypted
+only via explicit accessors (`findClaimPhi`, `findMemberById`).
 
 ---
 

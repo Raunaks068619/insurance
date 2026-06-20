@@ -99,13 +99,22 @@ is a one-line change if a queue is ever added.
 
 ### 9 — Capture `diagnosis_code` + `provider` as encrypted, non-adjudicated PHI
 
-**Chose:** Capture `diagnosis_code` and `provider` on the Claim, store them as sensitive
-(encryption-at-rest candidate), and **never** read them in adjudication.
-**Over:** Omitting them entirely (the earlier research lean).
-**Trade-off:** The brief explicitly names them as sensitive health data; capturing them is
-where we *demonstrate* the PHI-handling the brief is testing. Cost: PHI we must protect for
-zero math benefit — accepted deliberately, documented as the showcase of the PHI stance.
-**Reversible?:** Yes — they're inert fields.
+**Chose:** Capture `diagnosis_code` and `provider` on the Claim, **encrypt them at rest**
+(AES-256-GCM app-level field encryption, with `members.name`/`dob`), and **never** read them
+in adjudication. Encryption lives at one persistence seam (`phi-crypto.ts` + the member/claim
+repositories): encrypt on write, decrypt only via explicit accessors (`findClaimPhi`,
+`findMemberById`); the 32-byte key comes from `PHI_ENCRYPTION_KEY` (`.env`).
+**Over:** (a) Omitting the fields entirely (the earlier research lean); (b) leaving them as
+plain columns merely *labelled* "encrypt-at-rest" — the prior state, which the self-review
+flagged as a claim the bytes didn't back; (c) SQLCipher whole-file encryption, deferred to
+avoid a native-driver swap (noted as the production path).
+**Trade-off:** The brief explicitly names them as sensitive health data; encrypting them is
+where we *demonstrate* the PHI-handling the brief is testing. Cost: a key to manage and PHI we
+protect for zero math benefit — accepted deliberately. App-level field encryption (vs
+whole-file) leaves indexes/WAL unencrypted, but no PHI column is indexed, so the gap is nil here.
+**Reversible?:** Yes — decryptable via the accessors; the scheme is versioned (`g1:` prefix)
+for future key rotation. Proven by `app/tests/phi-encryption.test.ts` (ciphertext at rest,
+round-trip, tamper rejected).
 
 ### 10 — Claim + LineItem shape, closed 12-code catalog, `reasons[]` array
 

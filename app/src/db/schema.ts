@@ -17,8 +17,8 @@ const nowDefault = sql`(strftime('%Y-%m-%dT%H:%M:%fZ','now'))`;
 
 export const members = sqliteTable("members", {
   id: text("id").primaryKey(),
-  name: text("name").notNull(), // PHI
-  dob: text("dob").notNull(), // PHI
+  name: text("name").notNull(), // PHI — stores AES-256-GCM ciphertext (see db/phi-crypto.ts)
+  dob: text("dob").notNull(), // PHI — stores AES-256-GCM ciphertext
   createdAt: text("created_at").notNull().default(nowDefault),
 });
 
@@ -71,8 +71,8 @@ export const claims = sqliteTable("claims", {
     .notNull()
     .references(() => policies.id),
   serviceDate: text("service_date").notNull(),
-  provider: text("provider"), // PHI, nullable
-  diagnosisCode: text("diagnosis_code"), // PHI, nullable
+  provider: text("provider"), // PHI, nullable — AES-256-GCM ciphertext (see db/phi-crypto.ts)
+  diagnosisCode: text("diagnosis_code"), // PHI, nullable — AES-256-GCM ciphertext
   status: text("status").$type<ClaimStatus>().notNull().default("SUBMITTED"),
   claimSeq: integer("claim_seq").notNull().default(0),
   createdAt: text("created_at").notNull().default(nowDefault),
