@@ -56,5 +56,22 @@ export function createClaimController(deps: ClaimControllerDeps) {
       }
       return reply.code(200).send(snapshot);
     },
+
+    // GET /claims/:id/explanation — the per-line EOB, or 404 when no such claim exists.
+    explanation(
+      request: FastifyRequest<{ Params: { id: string } }>,
+      reply: FastifyReply,
+    ) {
+      const eob = deps.claimReadService.getExplanation(request.params.id);
+      if (!eob) {
+        return reply.code(404).send({
+          error: {
+            code: "CLAIM_NOT_FOUND",
+            message: `claim not found: ${request.params.id}`,
+          },
+        });
+      }
+      return reply.code(200).send(eob);
+    },
   };
 }

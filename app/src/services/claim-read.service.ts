@@ -26,6 +26,12 @@ export type ClaimSnapshot = {
   timeline: TransitionRecord[];
 };
 
+// The EOB view: per line, the reason code(s), the explanation sentence, and the numbers used.
+export type ClaimExplanation = {
+  claimId: string;
+  lineItems: ClaimAdjudicationLine[];
+};
+
 export type ClaimReadServiceDeps = {
   claims: ClaimRepository;
   adjudications: AdjudicationRepository;
@@ -55,7 +61,13 @@ export function createClaimReadService(deps: ClaimReadServiceDeps) {
     };
   }
 
-  return { ...deps, getClaimById };
+  // The per-line EOB for GET /claims/:id/explanation — undefined when no such claim exists.
+  function getExplanation(id: string): ClaimExplanation | undefined {
+    if (!deps.claims.findClaimById(id)) return undefined;
+    return { claimId: id, lineItems: deps.adjudications.byClaimId(id) };
+  }
+
+  return { ...deps, getClaimById, getExplanation };
 }
 
 export type ClaimReadService = ReturnType<typeof createClaimReadService>;

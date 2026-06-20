@@ -20,4 +20,5 @@ export function registerClaimRoutes(
     claims.submit,
   );
   app.get("/claims/:id", claims.getById);
+  app.get("/claims/:id/explanation", claims.explanation);
 }
