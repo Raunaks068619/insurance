@@ -14,4 +14,5 @@ export function registerClaimRoutes(
   const claims = createClaimController(deps);
 
   app.post("/claims", claims.submit);
+  app.get("/claims/:id", claims.getById);
 }

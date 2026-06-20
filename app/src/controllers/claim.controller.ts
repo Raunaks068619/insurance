@@ -25,5 +25,22 @@ export function createClaimController(deps: ClaimControllerDeps) {
       const snapshot = deps.claimReadService.getClaimById(claimId);
       return reply.code(201).send(snapshot);
     },
+
+    // GET /claims/:id — return the claim snapshot, or 404 when no such claim exists.
+    getById(
+      request: FastifyRequest<{ Params: { id: string } }>,
+      reply: FastifyReply,
+    ) {
+      const snapshot = deps.claimReadService.getClaimById(request.params.id);
+      if (!snapshot) {
+        return reply.code(404).send({
+          error: {
+            code: "CLAIM_NOT_FOUND",
+            message: `claim not found: ${request.params.id}`,
+          },
+        });
+      }
+      return reply.code(200).send(snapshot);
+    },
   };
 }
