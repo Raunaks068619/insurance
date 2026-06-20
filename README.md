@@ -29,15 +29,32 @@ SQLite is **embedded** — no database server needed.
 
 [`start.sh`](start.sh) checks Node 22+, installs pnpm if missing, installs dependencies, and starts the server. The DB seeds automatically on boot.
 
-Or manually:
+### Manual setup (without `start.sh`)
+
+Prefer to run the steps yourself? `start.sh` is just these commands — run them **from the repo root**:
 
 ```bash
-pnpm install   # install dependencies
-pnpm start     # seeds the DB automatically, then starts the API on http://localhost:3000
+# 1. Node 22+ is required — check your version
+node -v                       # must be v22.x or higher
+
+# 2. Get pnpm if you don't have it (either line works)
+corepack enable pnpm          # no sudo needed — ships with Node 16.13+
+# or: npm install -g pnpm
+
+# 3. Install dependencies (also builds the embedded SQLite native module)
+pnpm install
+
+# 4. Start the API — applies the schema + seeds the DB on boot, then serves :3000
+pnpm start
 ```
 
+No separate database to install or run: SQLite is **embedded**, and `pnpm start` creates,
+migrates, and seeds `./claims.db` automatically on every boot (idempotent — safe to restart).
+
+Run the test suite anytime:
+
 ```bash
-pnpm test      # run the full test suite (79 tests, all domain behavior)
+pnpm test      # 79 tests, all encoding domain behavior
 ```
 
 ### PHI encryption (optional config)
