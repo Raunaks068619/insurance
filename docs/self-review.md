@@ -47,8 +47,8 @@ line a second time does not currently deny it. The structure is in place; the qu
 
 **Explanation strings are inlined as template literals.** Each adjudication decision carries a plain
 English `explanation` sentence generated inline in the adjudicator. This works and is tested
-(HTTP explanation endpoint returns non-empty strings), but the strings are not templated from a
-lookup table. Real EOB systems use CARC/RARC code mappings with member-appropriate phrasing. The
+(the `GET /claims/:id` response asserts `explanation` is non-empty and matches a pattern), but
+the strings are not templated from a lookup table. Real EOB systems use CARC/RARC code mappings with member-appropriate phrasing. The
 current approach is serviceable for a demo; it would need a template layer before it could be
 reviewed or localized by a non-engineer.
 

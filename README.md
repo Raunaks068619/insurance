@@ -13,10 +13,10 @@ job is to demonstrate the domain.
 pnpm install      # install dependencies
 pnpm seed         # create the SQLite DB and load demo members, policies, rules
 pnpm test         # run the vitest suite (tests encode the domain rules)
-pnpm dev          # start the API on http://localhost:3000
+pnpm start        # start the API on http://localhost:3000
 ```
 
-> Requires Node 20+ and pnpm. SQLite is embedded (better-sqlite3) — no database server to
+> Requires Node 22+ and pnpm. SQLite is embedded (better-sqlite3) — no database server to
 > install or run.
 
 ## How the system is structured
@@ -97,16 +97,19 @@ The system accepts 12 service codes. Any other code is denied as `NO_COVERAGE`.
 
 ---
 
-## Demo (the 4 endpoints)
+## Demo (the 3 endpoints)
 
 `pnpm seed` loads a scenario matrix — one member per adjudication path. After seeding, run the
 flows below. Claim and line-item IDs are UUIDs returned by the first `POST`; capture them with
 `jq` as shown.
 
+> The per-line explanation (reason codes + plain-English sentence) is included directly in both
+> the `POST /claims` response and `GET /claims/:id` — there is no separate explanation endpoint.
+
 ### Scenario A — partial approval (PREVENTIVE approved + ADULT_DENTAL denied)
 
 ```bash
-# Submit → PARTIALLY_APPROVED (full coverage + excluded)
+# Submit → PARTIALLY_APPROVED; response already contains per-line reasons + explanation
 CLAIM=$(curl -s -X POST http://localhost:3000/claims \
   -H 'content-type: application/json' \
   -d '{
@@ -117,15 +120,15 @@ CLAIM=$(curl -s -X POST http://localhost:3000/claims \
           { "serviceCode": "ADULT_DENTAL", "billedCents": 8000  }
         ]
       }')
-echo "$CLAIM" | jq '{status, totalPayableCents, lineItems: [.lineItems[] | {serviceCode, status, payableCents, reasons}]}'
+
+# Claim status + per-line reasons and explanation
+echo "$CLAIM" | jq '{status, totalPayableCents, lineItems: [.lineItems[] | {serviceCode, status, payableCents, reasons, explanation}]}'
 
 CLAIM_ID=$(echo "$CLAIM" | jq -r '.id')
 
-# Fetch the claim snapshot + lifecycle timeline
-curl -s "http://localhost:3000/claims/$CLAIM_ID" | jq '{status, totalPayableCents, timeline: [.timeline[] | {reason, to_status}]}'
-
-# Get the per-line EOB (reason codes + explanation sentences)
-curl -s "http://localhost:3000/claims/$CLAIM_ID/explanation" | jq '.lineItems[] | {serviceCode, reasons, explanation}'
+# Fetch the same claim later — includes the lifecycle timeline
+curl -s "http://localhost:3000/claims/$CLAIM_ID" \
+  | jq '{status, totalPayableCents, timeline: [.timeline[] | {reason, toStatus}], lineItems: [.lineItems[] | {serviceCode, status, reasons, explanation}]}'
 ```
 
 ### Scenario B — dispute overturns a prior-auth denial
