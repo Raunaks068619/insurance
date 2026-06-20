@@ -92,12 +92,13 @@ export function makeClaimReadService(handle: DbHandle) {
   });
 }
 
-// The HTTP composition root for tests: a Fastify app wired to write + read services over one Db,
-// driven in-process via app.inject(). Overrides let a test swap in a stub service.
+// The HTTP composition root for tests: a Fastify app wired to write + read + dispute services over
+// one Db, driven in-process via app.inject(). Overrides let a test swap in a stub service.
 export function makeApp(handle: DbHandle, overrides: Partial<AppDeps> = {}) {
   return buildApp({
     claimService: makeClaimService(handle),
     claimReadService: makeClaimReadService(handle),
+    disputeService: makeDisputeService(handle),
     ...overrides,
   });
 }

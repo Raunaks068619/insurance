@@ -6,10 +6,11 @@
 
 import Fastify, { type FastifyInstance } from "fastify";
 import type { ClaimControllerDeps } from "./controllers/claim.controller";
+import type { DisputeControllerDeps } from "./controllers/dispute.controller";
 import { registerErrorHandler } from "./middlewares/error-handler";
 import { registerClaimRoutes } from "./routes/claims.routes";
 
-export type AppDeps = ClaimControllerDeps;
+export type AppDeps = ClaimControllerDeps & DisputeControllerDeps;
 
 export function buildApp(deps: AppDeps): FastifyInstance {
   const app = Fastify({ logger: false });

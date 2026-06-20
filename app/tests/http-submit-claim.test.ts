@@ -1,11 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildApp } from "../src/app";
-import {
-  freshDb,
-  makeClaimReadService,
-  makeClaimService,
-  seedWorld,
-} from "./db-helpers";
+import { freshDb, makeApp, seedWorld } from "./db-helpers";
 
 // POST /claims is the submit + adjudicate entrypoint. A structurally valid claim is accepted,
 // adjudicated synchronously, and the 201 response carries the claim's derived status, each line's
@@ -21,11 +15,7 @@ describe("POST /claims — submit and adjudicate", () => {
         { serviceCode: "ADULT_DENTAL", excluded: true },
       ],
     });
-    const app = buildApp({
-      claimService: makeClaimService(handle),
-      claimReadService: makeClaimReadService(handle),
-    });
-    return { app, memberId };
+    return { app: makeApp(handle), memberId };
   };
 
   it("accepts a valid claim, adjudicates each line, and returns the per-line decisions", async () => {
