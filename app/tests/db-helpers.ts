@@ -4,6 +4,7 @@
 // seedWorld() inserts the reference data (member + active policy + coverage rules) a claim needs.
 // makeClaimService() is the composition root: it wires the repositories + service over one Db.
 
+import { type AppDeps, buildApp } from "../src/app";
 import { type Db, type DbHandle, createDb } from "../src/db/connection";
 import { applySchema } from "../src/db/migrate";
 import { coverageRules, members, policies } from "../src/db/schema";
@@ -15,6 +16,7 @@ import { createCoverageRuleRepository } from "../src/repositories/coverage-rule.
 import { createDisputeRepository } from "../src/repositories/dispute.repository";
 import { createPolicyRepository } from "../src/repositories/policy.repository";
 import { createStatusTransitionRepository } from "../src/repositories/status-transition.repository";
+import { createClaimReadService } from "../src/services/claim-read.service";
 import {
   type ClaimServiceDeps,
   createClaimService,
@@ -76,6 +78,27 @@ export function makeSetStatus(handle: DbHandle) {
   return createSetStatus({
     claims: createClaimRepository(db),
     statusTransitions: createStatusTransitionRepository(db),
+  });
+}
+
+// The query-side composition root: read repos over the same Db, for GET /claims/:id + the
+// POST /claims response. Shares the handle with makeClaimService so reads see what writes wrote.
+export function makeClaimReadService(handle: DbHandle) {
+  const { db } = handle;
+  return createClaimReadService({
+    claims: createClaimRepository(db),
+    adjudications: createAdjudicationRepository(db),
+    statusTransitions: createStatusTransitionRepository(db),
+  });
+}
+
+// The HTTP composition root for tests: a Fastify app wired to write + read services over one Db,
+// driven in-process via app.inject(). Overrides let a test swap in a stub service.
+export function makeApp(handle: DbHandle, overrides: Partial<AppDeps> = {}) {
+  return buildApp({
+    claimService: makeClaimService(handle),
+    claimReadService: makeClaimReadService(handle),
+    ...overrides,
   });
 }
 
