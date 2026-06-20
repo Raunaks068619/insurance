@@ -6,6 +6,7 @@ import {
   type ClaimControllerDeps,
   createClaimController,
 } from "../controllers/claim.controller";
+import { submitClaimBodySchema } from "../schemas/api/submit-claim.schema";
 
 export function registerClaimRoutes(
   app: FastifyInstance,
@@ -13,6 +14,10 @@ export function registerClaimRoutes(
 ): void {
   const claims = createClaimController(deps);
 
-  app.post("/claims", claims.submit);
+  app.post(
+    "/claims",
+    { schema: { body: submitClaimBodySchema } },
+    claims.submit,
+  );
   app.get("/claims/:id", claims.getById);
 }
