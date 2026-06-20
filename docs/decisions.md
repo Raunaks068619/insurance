@@ -236,6 +236,41 @@ follows TDD minimalism — no test demands it until disputes (cycles 32–36). C
 depends on the adjudicator emitting `LIMIT_EXCEEDED` on a straddle (covered by cycles 17 + 25).
 **Reversible?:** Yes — additive; the `UNDER_REVIEW` branch is a one-line add when disputes need it.
 
+### 18 — SQLite scaffolding: canonical `schema.sql` from the ERD; layering service → repositories → db
+
+> **Status: SCAFFOLDED** (this session, `chore:` — no behavior; repository/service methods land
+> test-first at cycles 26+).
+
+**Chose:**
+- **`schema.sql` is the canonical DDL**, extracted *verbatim* from the locked
+  [`docs/erd-physical.md`](erd-physical.md) (9 tables, 11 triggers, 10 indexes) and applied wholesale
+  by `applySchema(sqlite)`. `schema.ts` (Drizzle table handles) **mirrors** it purely for type-safe
+  queries — it omits the CHECKs/triggers/composite-FKs (the DB enforces those).
+- **`createDb(path=':memory:')` factory** returns `{ db (Drizzle), sqlite }` and sets
+  `PRAGMA foreign_keys = ON` per connection. Each DB test opens a fresh in-memory DB, applies the
+  schema, runs, and discards it.
+- **Layering `service → repositories → db`:** repositories take the `Db` handle and own all data
+  access; services hold business logic / workflows and depend on **repositories**, never the raw
+  connection. The one-transaction-per-claim boundary will be injected as a `withTransaction` runner
+  so the `Db` still never leaks into the service.
+- **`updated_at`** kept (audit) and enforced by DB touch-triggers, not app discipline.
+
+**Over:** (a) `drizzle-kit generate` as the single source — its generated SQL can't round-trip the
+ERD's triggers, composite FKs, partial indexes, STRICT mode, and CHECK shapes, so it risks silent
+drift from the reviewed DDL; (b) a file-path singleton connection — breaks test isolation; (c)
+injecting the raw `Db` into services — a layering violation (corrected this session); (d) dropping
+`updated_at` / touching it in app code — goes stale silently.
+
+**Trade-off:** Canonical-SQL keeps the schema exactly as designed/reviewed at the cost of a **dual
+source** (the SQL DDL + a Drizzle mirror that must stay in sync) — accepted and documented (the ERD
+already states "code wins on drift"). The `:memory:` factory gives deterministic, isolated DB tests
+for free (satisfies the tdd-discipline "no shared state between tests"). The repository seam keeps the
+storage engine and transaction strategy swappable without touching services. Touch-triggers make
+`updated_at` honest but add wall-clock non-determinism — excluded from re-run comparisons (cycle 30).
+
+**Reversible?:** Yes — `schema.ts` could become the source via `drizzle-kit` later; repositories are
+the seam, so the storage engine and transaction wiring can change without touching the services.
+
 ---
 
 ## Decisions resolved this framing session

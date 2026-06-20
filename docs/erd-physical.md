@@ -702,6 +702,38 @@ WHEN NEW.resolved_adjudication_id IS NOT NULL
 BEGIN
   SELECT RAISE(ABORT, 'dispute resolved_adjudication seq must exceed original_adjudication seq');
 END;
+
+-- =====================================================================
+-- updated_at TOUCH — keep updated_at honest on the UPDATE-in-place tables
+-- (claims, line_items, accumulators). Without this, updated_at depends on app
+-- discipline and silently goes stale. The WHEN guard (NEW.updated_at = OLD.updated_at)
+-- stops the trigger's own UPDATE from re-firing it, and leaves an explicit
+-- app-supplied updated_at intact. (created_at is set once by its column DEFAULT.)
+-- updated_at is wall-clock metadata — excluded from determinism comparisons (cycle 30).
+-- =====================================================================
+CREATE TRIGGER trg_claims_touch_updated_at
+AFTER UPDATE ON claims
+FOR EACH ROW
+WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+  UPDATE claims SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_line_items_touch_updated_at
+AFTER UPDATE ON line_items
+FOR EACH ROW
+WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+  UPDATE line_items SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
+END;
+
+CREATE TRIGGER trg_accumulators_touch_updated_at
+AFTER UPDATE ON accumulators
+FOR EACH ROW
+WHEN NEW.updated_at = OLD.updated_at
+BEGIN
+  UPDATE accumulators SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = NEW.id;
+END;
 ```
 
 ---

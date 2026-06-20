@@ -16,13 +16,18 @@ honest and current — the next agent trusts it instead of re-deriving everythin
   mixed / straddle → `PARTIALLY_APPROVED`. Added the `ClaimStatus` type + a minimal
   `LineOutcome`; the `UNDER_REVIEW` branch is deliberately deferred to the dispute cycles (#24).
 
-**Next: the SQLite layer.** Scaffolding plan validated — **9 tables** (`members … status_transition`),
-**6 schema design calls** (JSON columns for the unions, `adjudications.deltas` for the dispute
-net-out, per-dimension accumulator rows, JSON `reasons[]`, prefixed-text ids, integer-cents /
-bool / ISO-text primitives), and a **`createDb(path=':memory:')` connection factory** so each DB
-test gets an isolated in-memory SQLite. Build as `chore:` scaffolding (no behavior), then cycles
-**26–36** test-first (26–27 writeback, 28–31 transition log, 32–36 disputes).
-(Housekeeping: regenerate the 3 stale infographics.)
+**Next: the SQLite layer — scaffolding DONE (uncommitted); cycles 26–36 next.** Physical schema
+locked in [`docs/erd-physical.md`](docs/erd-physical.md): **9 STRICT tables** with cost-share/limit
+**unions as typed columns + shape CHECKs** (only `adjudications.reasons_json` is JSON), `seq` +
+`billed_cents` snapshot + `delta_*` columns on `adjudications`, per-dimension `accumulators`,
+composite dispute FKs + append-only triggers + `updated_at` touch-triggers, UUID text ids.
+**Built this session (`chore:`, no behavior):** deps (`better-sqlite3` + `drizzle-orm`; native build
+approved in `pnpm-workspace.yaml`); `app/src/db/schema.sql` (canonical DDL, extracted **verbatim**
+from the ERD — 9 tables / 11 triggers / 10 indexes); `createDb(path=':memory:')` factory +
+`applySchema`; `schema.ts` Drizzle handles (mirror); repository + service DI skeletons
+(**service → repositories → db**); a schema smoke test. **28/28 green**, `tsc` clean. **Next: cycles
+26–36 test-first** (26–27 writeback, 28–31 transition log, 32–36 disputes) — the repo/service methods
+get driven into existence there. (Housekeeping: regenerate the 3 stale infographics.)
 
 ## Current phase
 
@@ -69,6 +74,7 @@ Nothing blocked.
 | 22 | 2026-06-19 | **Disputable from any terminal line** (APPROVED/partial/DENIED); **single-line re-adjudication with accumulator net-out** (`current − this line's original deltas`); no sibling/cross-claim cascade | Members dispute underpayments too. Blind delta-reversal corrupts shared accumulators; net-out keeps the invariant (each dimension = Σ of every line's *latest* deltas). Cascade out of scope (documented). Corrects adjudication-plan's old "reverse deltas" wording. | No |
 | 23 | 2026-06-19 | **4-value dispute outcome** `UPHELD\|OVERTURNED\|PARTIALLY_OVERTURNED\|MODIFIED` (diff new vs original); line `*→NEEDS_REVIEW→{APPROVED\|DENIED}`; dispute `OPEN→RESOLVED`; `DISPUTED_OVERRIDE` unused (v2 slot) | Deterministic + testable; keeps the locked `NEEDS_REVIEW` name; UPHELD surfaced honestly so a no-change dispute isn't mistaken for broken. Adds TDD cycles 32–36. Confirmed with the user after a 3-agent stress-test. | No |
 | 24 | 2026-06-19 | **Claim aggregation implemented (cycles 22–25).** A *straddle* = an `APPROVED` line whose `reasons` include `LIMIT_EXCEEDED` → claim `PARTIALLY_APPROVED`; the aggregator reads a minimal `LineOutcome {status, reasons}`; `PARTIALLY_APPROVED` stays claim-level-only; `UNDER_REVIEW` (any `NEEDS_REVIEW` line) deferred to the dispute cycles | Detects a partial payout from the reason code already emitted on a straddle — no new partial *line* state, keeping the locked line/claim split (#14/#19). Minimal `LineOutcome` decouples the pure aggregator from the persistence/result shape. `UNDER_REVIEW` has no triggering test until disputes (TDD minimalism). See decisions.md #17. | No |
+| 25 | 2026-06-20 | **SQLite layer scaffolded (`chore:`).** `schema.sql` (extracted **verbatim** from `docs/erd-physical.md`) is the **canonical DDL**; `schema.ts` Drizzle handles **mirror** it for typed queries (no `drizzle-kit generate`). `createDb(path=':memory:')` factory → isolated in-memory DB per test. Layering **service → repositories → db** (services hold workflows; repositories own the `Db`). `updated_at` enforced by DB touch-triggers. | Faithful to the reviewed ERD (triggers/CHECKs/composite-FKs Drizzle can't all express); dual-source (SQL canonical + Drizzle mirror) accepted + documented. `:memory:` factory satisfies tdd-discipline "no shared state between tests". A service reaching the raw `Db` was a layering slip, corrected this session. See decisions.md #18. | No |
 
 ## Domain research findings (2026-06-18)
 
@@ -97,16 +103,20 @@ synthesis in `ai-artifacts/02-domain-research/`. Key findings that shaped the mo
 | 2026-06-19 | Claude Code (Opus) | 03-design | Strengthened lifecycle tracking: **dropped `PAID`/settle from v1** (#19) and locked a **status-transition audit log** (#20, designed with the System/Solution Architect) → TDD now 31 cycles. Propagated across PRD, decisions, domain-model, adjudication-plan, visual-reference. | **Detail the dispute events** (what a dispute writes + its re-adjudication transitions, Q4), then start TDD cycle 1. Save this session's JSONL to `ai-artifacts/03-design/`. |
 | 2026-06-19 | Claude Code (Opus) | 03-design | **Closed Q4 — dispute made first-class.** Ran 3 agents (repo audit + domain research + architecture stress-test); surfaced the determinism no-op + the accumulator delta-reversal bug; user confirmed 4 forks. Locked #21–#23; fixed the "reverse deltas" wording → net-out; added dispute spec + cycles 32–36 to adjudication-plan; propagated to decisions (#16). | **Start TDD cycle 1 (`no rule → NO_COVERAGE`), test-first.** Propagate dispute to domain-model + insurance-domain skill. Save this session's JSONL to `ai-artifacts/03-design/`. |
 | 2026-06-19 | Claude Code (Opus) | 04-coding | **Implemented claim aggregation (cycles 22–25), test-first** → `aggregateClaimStatus` (all-approved / all-denied / mixed / straddle) + `ClaimStatus` type + `LineOutcome`; **25/25 tests green**, `tsc` + `biome` clean, committed `a11c081`. Corrected a stale assumption that 23–27 were "already done" — only 1–21 were. **Validated the DB scaffolding plan** (9 tables + 6 design calls + a `createDb(':memory:')` factory). Logged decision #24 / decisions.md #17. | **Scaffold the SQLite layer** (schema + connection factory + repo/service skeletons — `chore:`, no behavior), then TDD cycles 26–27 (writeback), test-first. |
+| 2026-06-20 | Claude Code (Opus) | 04-coding | **Reconciled the DB design + scaffolded the SQLite layer (`chore:`, no behavior).** Audited the napkin "9 tables" vs `docs/erd-physical.md` (ERD wins: unions = typed columns not JSON, UUID ids); pruned-then-restored the `created_at`/`updated_at` columns (kept for audit) + added `updated_at` touch-triggers. Installed `better-sqlite3`/`drizzle-orm` (+ approved the native build); built `schema.sql` (canonical, from the ERD), `createDb(':memory:')` factory, `applySchema`, Drizzle `schema.ts`, repo/service DI skeletons (fixed a service→`Db` layering slip → service depends on **repositories**), and a schema smoke test. **28/28 green**, `tsc` + `biome` clean (new files). Logged decision #25 / decisions.md #18. | **Commit the `chore:` scaffolding**, then start TDD **cycle 26** (full claim persists → append-only, one txn), test-first. (Pre-existing biome drift in 5 committed files is unrelated — offer a separate `chore: format`.) |
 
 ## Notes for next agent
 
 - Scaffold lives at the repo root (`/insurance`), not in a nested `claims-system/` — the
   existing `.git` is at the root, so the root *is* the project.
 - `project-docs/` holds the original assignment brief. Reference it; do not edit it.
-- **Pure core is done & committed** (`a11c081`): `adjudicateLine` (cycles 1–21) +
-  `aggregateClaimStatus` (22–25), **25 tests green**, `tsc` + `biome` clean. Next code is the
-  **SQLite layer** — start with `chore:` scaffolding (schema + `createDb(':memory:')` factory +
-  repo/service skeletons that `throw "not implemented"`), then cycles 26–36 **test-first**.
+- **Pure core done & committed** (`a11c081`): `adjudicateLine` (1–21) + `aggregateClaimStatus`
+  (22–25). **SQLite scaffolding done this session (uncommitted):** `app/src/db/schema.sql` (canonical
+  DDL from the ERD), `createDb(':memory:')` factory + `applySchema`, Drizzle `schema.ts`, repo/service
+  DI skeletons (**service → repositories → db**), schema smoke test. **28/28 green.** Next code = TDD
+  **cycles 26–36**, test-first — the repo/service methods get driven into existence there.
+- **DB test pattern:** open a fresh `createDb(':memory:')` → `applySchema(sqlite)` → run → `sqlite.close()`; one isolated in-memory DB per test (template: `app/tests/db-schema.test.ts`).
+- **Repo/service skeletons are intentionally method-less** — only the DI seam exists; methods arrive test-first (cycles 26+). Services depend on repositories, never the raw `Db`.
 - **The adjudication build is fully specced in [`docs/adjudication-plan.md`](docs/adjudication-plan.md)** — the **36-cycle** TDD order is the coding checklist. **Cycles 1–25 ✅ done**; 26–36 touch SQLite (26–27 writeback; 28–31 = the status-transition log; 32–36 = the first-class dispute flow).
 - Load the `insurance-domain` + `tdd-discipline` skills before the first cycle.
 - Per the assignment, this design session's raw JSONL must be saved into `ai-artifacts/03-design/` (use `/end-session`).
