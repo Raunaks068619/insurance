@@ -271,6 +271,38 @@ storage engine and transaction strategy swappable without touching services. Tou
 **Reversible?:** Yes — `schema.ts` could become the source via `drizzle-kit` later; repositories are
 the seam, so the storage engine and transaction wiring can change without touching the services.
 
+### 19 — Cycle 26 writeback: one `adjudicateClaim` entrypoint in one transaction; ERD GLOB date-guard bug fixed
+
+> **Status: IMPLEMENTED** (cycle 26, this session — `claimService.adjudicateClaim` + real repo methods).
+
+**Chose:**
+- A **single `claimService.adjudicateClaim(input)`** entrypoint that, in **one transaction**, resolves
+  the active policy + coverage rules, persists the claim + line items, adjudicates each line in order
+  (reusing the pure `adjudicateLine`), appends an immutable decision per line, advances the
+  accumulators, aggregates the claim status, and writes it back.
+- The transaction is an **injected `withTransaction` runner** (built from `better-sqlite3`'s
+  connection-level transaction), so the raw `Db` never enters the service — repositories own data access.
+- **Lazy accumulator rows** — only dimensions a claim actually touches (`DEDUCTIBLE` / `OOP` /
+  `LIMIT:<svc>`) are upserted; a fresh claim with only a copay creates just the `OOP` row.
+- **Bug fix (found by the cycle-26 red):** the ERD's date guard `GLOB '____-__-__'` used LIKE-style
+  `_` wildcards, but in **GLOB** `_` is a *literal* — so the CHECK rejected every well-formed date.
+  Corrected to `[0-9]` digit classes in the ERD (the source) and re-extracted `schema.sql`.
+
+**Over:** (a) split `submitClaim()` + `adjudicateClaim(claimId)` — the single entrypoint is simpler for
+the writeback cycles and still logs the submit→adjudicate→aggregate phases internally (28–31); (b)
+giving the service the raw `Db` for its transaction (layering violation — the runner keeps it out); (c)
+pre-creating zero-valued accumulator rows (not lazy); (d) patching only `schema.sql` for the GLOB bug
+(would drift from the ERD — fixed the source instead).
+
+**Trade-off:** Reuses the entire deterministic pure engine (`adjudicateLine` / `aggregateClaimStatus`)
+unchanged behind the persistence layer. The GLOB bug was invisible to the schema smoke test (it never
+inserted a row) and only surfaced once cycle 26 inserted a policy — a concrete case for "tests over
+type-checks". **Known gap:** duplicate detection (`alreadyAdjudicated`) is still hardcoded `false` — the
+cross-claim fingerprint check has no triggering DB test yet and is deferred.
+
+**Reversible?:** Yes — the entrypoint can split later; the duplicate check slots in behind the same
+fingerprint the writeback already computes.
+
 ---
 
 ## Decisions resolved this framing session

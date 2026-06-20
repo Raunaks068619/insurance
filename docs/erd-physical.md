@@ -170,8 +170,8 @@ erDiagram
 | `id` | TEXT | PK | NOT NULL | UUID surrogate |
 | `member_id` | TEXT | FK→members.id | NOT NULL; ON DELETE RESTRICT / ON UPDATE CASCADE | a member with a policy must not vanish |
 | `plan_year` | TEXT | UK | NOT NULL | accumulator window key (e.g. `2025`) |
-| `effective_date` | TEXT | | NOT NULL; GLOB `____-__-__` | policy-active lower bound |
-| `termination_date` | TEXT | | NOT NULL; GLOB `____-__-__` | policy-active upper bound |
+| `effective_date` | TEXT | | NOT NULL; GLOB `[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]` | policy-active lower bound |
+| `termination_date` | TEXT | | NOT NULL; GLOB `[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]` | policy-active upper bound |
 | `deductible_cents` | INTEGER | | NOT NULL; CHECK ≥ 0 | integer cents |
 | `oop_max_cents` | INTEGER | | NOT NULL; CHECK ≥ 0; CHECK ≥ `deductible_cents` | OOP max never below deductible |
 | `created_at` | TEXT | | NOT NULL DEFAULT now | metadata |
@@ -207,7 +207,7 @@ erDiagram
 | `id` | TEXT | PK | NOT NULL | UUID surrogate |
 | `member_id` | TEXT | FK→members.id | NOT NULL; ON DELETE RESTRICT / ON UPDATE CASCADE | claims are audit/financial records |
 | `policy_id` | TEXT | FK→policies.id | NOT NULL; ON DELETE RESTRICT / ON UPDATE CASCADE | resolved & recorded at intake (review finding #4-major) |
-| `service_date` | TEXT | | NOT NULL; GLOB `____-__-__` | claim-level; drives policy-active gate |
+| `service_date` | TEXT | | NOT NULL; GLOB `[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]` | claim-level; drives policy-active gate |
 | `provider` | TEXT | | NULL | PHI; not adjudicated |
 | `diagnosis_code` | TEXT | | NULL | PHI; not adjudicated |
 | `status` | TEXT | | NOT NULL DEFAULT `SUBMITTED`; CHECK in claim enum | derived by aggregation; stored source of truth |
@@ -355,8 +355,8 @@ CREATE TABLE policies (
   CONSTRAINT ck_policies_oop_ge_deductible CHECK (oop_max_cents    >= deductible_cents),
   CONSTRAINT ck_policies_date_window       CHECK (effective_date  <= termination_date),
   -- lightweight ISO-8601 date format guard (review finding: malformed dates):
-  CONSTRAINT ck_policies_eff_fmt  CHECK (effective_date   GLOB '____-__-__'),
-  CONSTRAINT ck_policies_term_fmt CHECK (termination_date GLOB '____-__-__')
+  CONSTRAINT ck_policies_eff_fmt  CHECK (effective_date   GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  CONSTRAINT ck_policies_term_fmt CHECK (termination_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 ) STRICT;
 
 -- =====================================================================
@@ -436,7 +436,7 @@ CREATE TABLE claims (
   CONSTRAINT ck_claims_status
     CHECK (status IN ('SUBMITTED','UNDER_REVIEW','APPROVED','PARTIALLY_APPROVED','DENIED')),
   CONSTRAINT ck_claims_seq_nonneg CHECK (claim_seq >= 0),
-  CONSTRAINT ck_claims_service_date_fmt CHECK (service_date GLOB '____-__-__')
+  CONSTRAINT ck_claims_service_date_fmt CHECK (service_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 ) STRICT;
 
 -- =====================================================================
@@ -780,7 +780,7 @@ A reviewer pushed to constrain every `service_code` to the closed 12-entry catal
 `members.name`/`dob`, `claims.provider`/`diagnosis_code` are PHI, isolated to member/claim records; the adjudication engine input is typed to exclude them (keys on `member_id` → policy + accumulators), so it **structurally** never reads them. SQLite has no native column encryption; documented approach is SQLCipher whole-file encryption-at-rest or app-level field encryption before insert.
 
 ### Date format guards (review finding #date-fmt, minor → applied)
-Logic-driving date columns (`policies.effective_date`/`termination_date`, `claims.service_date`) carry `GLOB '____-__-__'` CHECKs. STRICT enforces TEXT affinity only, not format; the policy-active gate compares dates lexically, which is correct **only** for well-formed zero-padded ISO dates — so well-formedness is now a constraint, not an assumption. (Timestamp columns remain unguarded for brevity; they are metadata or app-set ISO strings.)
+Logic-driving date columns (`policies.effective_date`/`termination_date`, `claims.service_date`) carry `GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'` CHECKs. STRICT enforces TEXT affinity only, not format; the policy-active gate compares dates lexically, which is correct **only** for well-formed zero-padded ISO dates — so well-formedness is now a constraint, not an assumption. (Timestamp columns remain unguarded for brevity; they are metadata or app-set ISO strings.)
 
 ### reasons_json (review finding #reasons-1NF, minor → hardened, kept as JSON)
 Stored as an ordered JSON `ReasonCode[]` (dominant first), `CHECK (json_type = 'array' AND json_array_length >= 1)` — strengthened beyond `json_valid` to guarantee a non-empty array. The closed `ReasonCode` enum membership is enforced in the zod/app layer (`src/domain/reason-codes.ts`); SQLite cannot CHECK every array element without a recursive trigger. A child `adjudication_reasons` table was considered and **rejected** for v1: it adds a join + ordinal column for a small, immutable, always-read-together array. Documented compromise; promote to a child table only if pure-relational queryability by reason code is required.

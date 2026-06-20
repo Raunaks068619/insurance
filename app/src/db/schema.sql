@@ -42,8 +42,8 @@ CREATE TABLE policies (
   CONSTRAINT ck_policies_oop_ge_deductible CHECK (oop_max_cents    >= deductible_cents),
   CONSTRAINT ck_policies_date_window       CHECK (effective_date  <= termination_date),
   -- lightweight ISO-8601 date format guard (review finding: malformed dates):
-  CONSTRAINT ck_policies_eff_fmt  CHECK (effective_date   GLOB '____-__-__'),
-  CONSTRAINT ck_policies_term_fmt CHECK (termination_date GLOB '____-__-__')
+  CONSTRAINT ck_policies_eff_fmt  CHECK (effective_date   GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'),
+  CONSTRAINT ck_policies_term_fmt CHECK (termination_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 ) STRICT;
 
 -- =====================================================================
@@ -123,7 +123,7 @@ CREATE TABLE claims (
   CONSTRAINT ck_claims_status
     CHECK (status IN ('SUBMITTED','UNDER_REVIEW','APPROVED','PARTIALLY_APPROVED','DENIED')),
   CONSTRAINT ck_claims_seq_nonneg CHECK (claim_seq >= 0),
-  CONSTRAINT ck_claims_service_date_fmt CHECK (service_date GLOB '____-__-__')
+  CONSTRAINT ck_claims_service_date_fmt CHECK (service_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
 ) STRICT;
 
 -- =====================================================================
