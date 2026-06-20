@@ -61,11 +61,11 @@ only via explicit accessors (`findClaimPhi`, `findMemberById`).
 
 | Deliverable | Where to find it |
 |---|---|
-| `.git` folder + commit history | Root of the zip — 10 commits, TDD trail visible |
+| `.git` folder + commit history | Root of the zip — full commit history, TDD trail visible |
 | JSONL session logs (35 sessions) | [`JSONL_session_logs/`](JSONL_session_logs/) — all raw Claude Code sessions, unedited |
 | README | This file |
 | Domain model | [`docs/domain-model.md`](docs/domain-model.md) — entities, state machines, worked numeric examples |
-| Decisions | [`docs/decisions.md`](docs/decisions.md) — 29 numbered decisions with rationale and trade-offs |
+| Decisions | [`docs/decisions.md`](docs/decisions.md) — 22 numbered decisions with rationale and trade-offs |
 | Self-review | [`docs/self-review.md`](docs/self-review.md) — honest gap-list, confidence calibration |
 | Working system | `./start.sh` — checks Node, installs deps, auto-seeds, starts on `:3000` |
 | Tests | `pnpm test` — 79 tests, all encoding domain behavior |
@@ -555,7 +555,7 @@ app/tests/         behavior specs — domain unit tests + HTTP integration tests
 
 docs/
   domain-model.md  entities, state machines, worked examples
-  decisions.md     21 numbered decisions with rationale
+  decisions.md     22 numbered decisions with rationale
   self-review.md   honest gap-list
 
 JSONL_session_logs/      raw JSONL session logs — 35 Claude Code sessions, unedited
