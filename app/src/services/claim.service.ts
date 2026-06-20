@@ -2,20 +2,18 @@
 //
 // A SERVICE holds business logic / workflows; it depends on REPOSITORIES (which own the Db and
 // encapsulate all data access), never on the raw connection. Layering: service → repositories → db.
-// The one-transaction-per-claim boundary is a `withTransaction` runner injected as a dep, so the
-// raw Db never leaks into the service.
+// Every status change routes through the injected setStatus() chokepoint (status column + transition
+// log in one write). The one-transaction-per-claim boundary is an injected withTransaction runner.
 
 import { adjudicateLine } from "../domain/adjudication/adjudicator";
 import type { ClaimStatus } from "../domain/entities/claim";
-import {
-  type LineOutcome,
-  aggregateClaimStatus,
-} from "../domain/state-machines/claim-state";
+import { type LineOutcome, aggregateClaimStatus } from "../domain/state-machines/claim-state";
 import type { AccumulatorRepository } from "../repositories/accumulator.repository";
 import type { AdjudicationRepository } from "../repositories/adjudication.repository";
 import type { ClaimRepository } from "../repositories/claim.repository";
 import type { CoverageRuleRepository } from "../repositories/coverage-rule.repository";
 import type { PolicyRepository } from "../repositories/policy.repository";
+import type { SetStatus } from "./set-status";
 
 export type ClaimServiceDeps = {
   claims: ClaimRepository;
@@ -23,6 +21,7 @@ export type ClaimServiceDeps = {
   accumulators: AccumulatorRepository;
   coverageRules: CoverageRuleRepository;
   policies: PolicyRepository;
+  setStatus: SetStatus;
   withTransaction: <T>(fn: () => T) => T;
 };
 
@@ -44,20 +43,13 @@ export type AdjudicateClaimResult = { claimId: string; status: ClaimStatus };
 export function createClaimService(deps: ClaimServiceDeps) {
   function adjudicateClaim(input: AdjudicateClaimInput): AdjudicateClaimResult {
     return deps.withTransaction(() => {
-      const policy = deps.policies.findActiveForMember(
-        input.memberId,
-        input.serviceDate,
-      );
+      const policy = deps.policies.findActiveForMember(input.memberId, input.serviceDate);
       if (!policy) {
-        throw new Error(
-          `no active policy for member ${input.memberId} on ${input.serviceDate}`,
-        );
+        throw new Error(`no active policy for member ${input.memberId} on ${input.serviceDate}`);
       }
       const planYear = String(policy.planYear);
       const ruleByService = new Map(
-        deps.coverageRules
-          .findByPolicy(policy.id)
-          .map((r) => [r.serviceCode, r]),
+        deps.coverageRules.findByPolicy(policy.id).map((r) => [r.serviceCode, r]),
       );
 
       const claimId = deps.claims.insertClaim({
@@ -67,18 +59,16 @@ export function createClaimService(deps: ClaimServiceDeps) {
         provider: input.provider ?? null,
         diagnosisCode: input.diagnosisCode ?? null,
       });
+      deps.setStatus({
+        claimId,
+        target: { type: "CLAIM", status: "SUBMITTED" },
+        fromStatus: null,
+        actor: "SYSTEM",
+        reason: "SUBMIT",
+      });
 
-      // One snapshot at claim start; deltas applied to this working copy between lines so a later
-      // line sees an earlier line's deductible/OOP/limit draw (determinism — cycle 20).
-      const acc = deps.accumulators.snapshot(input.memberId, planYear);
-      const touched = {
-        deductible: false,
-        oop: false,
-        limits: new Set<string>(),
-      };
-      const outcomes: LineOutcome[] = [];
-
-      for (const li of input.lineItems) {
+      // Phase 1 — persist + submit every line (PENDING).
+      const submitted = input.lineItems.map((li) => {
         const fingerprint = `${input.memberId}|${li.serviceCode}|${input.serviceDate}|${li.billedCents}`;
         const line = deps.claims.insertLine(claimId, {
           serviceCode: li.serviceCode,
@@ -87,7 +77,23 @@ export function createClaimService(deps: ClaimServiceDeps) {
           priorAuthPresent: li.priorAuthPresent,
           fingerprint,
         });
+        deps.setStatus({
+          claimId,
+          target: { type: "LINE_ITEM", id: line.id, status: "PENDING" },
+          fromStatus: null,
+          actor: "SYSTEM",
+          reason: "SUBMIT",
+        });
+        return { line, fingerprint };
+      });
 
+      // Phase 2 — adjudicate each line in order. One snapshot at claim start; deltas are applied to
+      // this working copy between lines so a later line sees an earlier line's draw (determinism).
+      const acc = deps.accumulators.snapshot(input.memberId, planYear);
+      const touched = { deductible: false, oop: false, limits: new Set<string>() };
+      const outcomes: LineOutcome[] = [];
+
+      for (const { line, fingerprint } of submitted) {
         const result = adjudicateLine({
           line: {
             id: line.id,
@@ -100,22 +106,23 @@ export function createClaimService(deps: ClaimServiceDeps) {
             fingerprint,
           },
           policy,
-          rule: ruleByService.get(li.serviceCode),
+          rule: ruleByService.get(line.serviceCode),
           serviceDate: input.serviceDate,
           acc: {
             deductibleMetCents: acc.deductibleMetCents,
             oopMetCents: acc.oopMetCents,
-            limitUsed: acc.limitUsedByService[li.serviceCode] ?? 0,
+            limitUsed: acc.limitUsedByService[line.serviceCode] ?? 0,
           },
           alreadyAdjudicated: false,
         });
 
+        // adjudicateLine only ever decides APPROVED | DENIED (never PENDING/NEEDS_REVIEW)
+        const newStatus = result.status as "APPROVED" | "DENIED";
         deps.adjudications.append({
           lineItemId: line.id,
           planYear,
           seq: 1, // first decision for this line; a dispute re-adjudication appends a higher seq
-          // adjudicateLine only ever decides APPROVED | DENIED (never PENDING/NEEDS_REVIEW)
-          status: result.status as "APPROVED" | "DENIED",
+          status: newStatus,
           billedCents: line.billedCents,
           payableCents: result.payableCents,
           memberResponsibilityCents: result.memberResponsibilityCents,
@@ -123,7 +130,13 @@ export function createClaimService(deps: ClaimServiceDeps) {
           explanation: result.explanation,
           deltas: result.deltas,
         });
-        deps.claims.setLineStatus(line.id, result.status);
+        deps.setStatus({
+          claimId,
+          target: { type: "LINE_ITEM", id: line.id, status: newStatus },
+          fromStatus: "PENDING",
+          actor: "SYSTEM",
+          reason: "ADJUDICATED",
+        });
 
         if (result.deltas.deductibleIncCents > 0) {
           acc.deductibleMetCents += result.deltas.deductibleIncCents;
@@ -134,13 +147,12 @@ export function createClaimService(deps: ClaimServiceDeps) {
           touched.oop = true;
         }
         if (result.deltas.limitInc > 0) {
-          acc.limitUsedByService[li.serviceCode] =
-            (acc.limitUsedByService[li.serviceCode] ?? 0) +
-            result.deltas.limitInc;
-          touched.limits.add(li.serviceCode);
+          acc.limitUsedByService[line.serviceCode] =
+            (acc.limitUsedByService[line.serviceCode] ?? 0) + result.deltas.limitInc;
+          touched.limits.add(line.serviceCode);
         }
 
-        outcomes.push({ status: result.status, reasons: result.reasons });
+        outcomes.push({ status: newStatus, reasons: result.reasons });
       }
 
       // persist only the dimensions this claim actually touched (rows are created lazily)
@@ -178,7 +190,13 @@ export function createClaimService(deps: ClaimServiceDeps) {
       }
 
       const status = aggregateClaimStatus(outcomes);
-      deps.claims.setClaimStatus(claimId, status);
+      deps.setStatus({
+        claimId,
+        target: { type: "CLAIM", status },
+        fromStatus: "SUBMITTED",
+        actor: "SYSTEM",
+        reason: "AGGREGATED",
+      });
       return { claimId, status };
     });
   }

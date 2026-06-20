@@ -106,6 +106,18 @@ export function createClaimRepository(db: Db) {
       db.update(claims).set({ status }).where(eq(claims.id, claimId)).run();
     },
 
+    // Advance the claim's logical clock (the head for status_transitions.seq) and return it.
+    bumpClaimSeq(claimId: string): number {
+      const row = db
+        .select({ seq: claims.claimSeq })
+        .from(claims)
+        .where(eq(claims.id, claimId))
+        .get();
+      const next = (row?.seq ?? 0) + 1;
+      db.update(claims).set({ claimSeq: next }).where(eq(claims.id, claimId)).run();
+      return next;
+    },
+
     findLineById(id: string): LineRecord | undefined {
       const row = db.select().from(lineItems).where(eq(lineItems.id, id)).get();
       if (!row) return undefined;

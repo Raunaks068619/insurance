@@ -14,6 +14,7 @@ import { createClaimRepository } from "../src/repositories/claim.repository";
 import { createCoverageRuleRepository } from "../src/repositories/coverage-rule.repository";
 import { createDisputeRepository } from "../src/repositories/dispute.repository";
 import { createPolicyRepository } from "../src/repositories/policy.repository";
+import { createStatusTransitionRepository } from "../src/repositories/status-transition.repository";
 import {
   type ClaimServiceDeps,
   createClaimService,
@@ -22,6 +23,7 @@ import {
   type DisputeServiceDeps,
   createDisputeService,
 } from "../src/services/dispute.service";
+import { createSetStatus } from "../src/services/set-status";
 
 export function freshDb() {
   const handle = createDb(":memory:");
@@ -34,12 +36,15 @@ export function makeClaimService(
   overrides: Partial<ClaimServiceDeps> = {},
 ) {
   const { db, sqlite } = handle;
+  const claims = createClaimRepository(db);
+  const statusTransitions = createStatusTransitionRepository(db);
   return createClaimService({
-    claims: createClaimRepository(db),
+    claims,
     adjudications: createAdjudicationRepository(db),
     accumulators: createAccumulatorRepository(db),
     coverageRules: createCoverageRuleRepository(db),
     policies: createPolicyRepository(db),
+    setStatus: createSetStatus({ claims, statusTransitions }),
     // one transaction per claim — better-sqlite3 wraps every statement on this connection
     withTransaction: <T>(fn: () => T): T => sqlite.transaction(fn)(),
     ...overrides,
@@ -51,15 +56,26 @@ export function makeDisputeService(
   overrides: Partial<DisputeServiceDeps> = {},
 ) {
   const { db, sqlite } = handle;
+  const claims = createClaimRepository(db);
+  const statusTransitions = createStatusTransitionRepository(db);
   return createDisputeService({
-    claims: createClaimRepository(db),
+    claims,
     adjudications: createAdjudicationRepository(db),
     accumulators: createAccumulatorRepository(db),
     coverageRules: createCoverageRuleRepository(db),
     policies: createPolicyRepository(db),
     disputes: createDisputeRepository(db),
+    setStatus: createSetStatus({ claims, statusTransitions }),
     withTransaction: <T>(fn: () => T): T => sqlite.transaction(fn)(),
     ...overrides,
+  });
+}
+
+export function makeSetStatus(handle: DbHandle) {
+  const { db } = handle;
+  return createSetStatus({
+    claims: createClaimRepository(db),
+    statusTransitions: createStatusTransitionRepository(db),
   });
 }
 

@@ -2,10 +2,10 @@
 // Only ever INSERTs — append-only is enforced by triggers in schema.sql.
 
 import { randomUUID } from "node:crypto";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import type { Db } from "../db/connection";
-import { adjudications } from "../db/schema";
 import type { ReasonCode } from "../domain/reason-codes";
+import { adjudications } from "../db/schema";
 
 export type NewAdjudication = {
   lineItemId: string;
@@ -80,9 +80,24 @@ export function createAdjudicationRepository(db: Db) {
         },
       };
     },
+
+    // Each line's CURRENT decision (its max-seq adjudication) for one claim — for re-aggregation.
+    currentOutcomesByClaim(
+      claimId: string,
+    ): { status: "APPROVED" | "DENIED"; reasons: ReasonCode[] }[] {
+      const rows = db.all<{ status: "APPROVED" | "DENIED"; reasons_json: string }>(sql`
+        SELECT a.status AS status, a.reasons_json AS reasons_json
+        FROM line_items li
+        JOIN adjudications a ON a.line_item_id = li.id
+        WHERE li.claim_id = ${claimId}
+          AND a.seq = (SELECT MAX(seq) FROM adjudications WHERE line_item_id = li.id)
+      `);
+      return rows.map((r) => ({
+        status: r.status,
+        reasons: JSON.parse(r.reasons_json) as ReasonCode[],
+      }));
+    },
   };
 }
 
-export type AdjudicationRepository = ReturnType<
-  typeof createAdjudicationRepository
->;
+export type AdjudicationRepository = ReturnType<typeof createAdjudicationRepository>;
