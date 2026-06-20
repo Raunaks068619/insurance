@@ -43,16 +43,31 @@ export type AdjudicateClaimInput = {
 
 export type AdjudicateClaimResult = { claimId: string; status: ClaimStatus };
 
+// An intake identity failure (4xx) — distinct from an adjudication decision (HTTP 200). Thrown when
+// a claim cannot be resolved to a member's policy at all; the controller maps it to a 400 reject.
+export class ClaimIntakeError extends Error {
+  readonly field: string;
+  readonly code: string;
+  constructor(field: string, code: string, message: string) {
+    super(message);
+    this.name = "ClaimIntakeError";
+    this.field = field;
+    this.code = code;
+  }
+}
+
 export function createClaimService(deps: ClaimServiceDeps) {
   function adjudicateClaim(input: AdjudicateClaimInput): AdjudicateClaimResult {
     return deps.withTransaction(() => {
-      const policy = deps.policies.findActiveForMember(
-        input.memberId,
-        input.serviceDate,
-      );
+      // Resolve the member's policy WITHOUT a date filter: an out-of-window date is a
+      // POLICY_NOT_ACTIVE decision (the adjudicator's first gate), not an intake reject. Only a
+      // member with no policy on file is unresolvable.
+      const policy = deps.policies.findByMember(input.memberId);
       if (!policy) {
-        throw new Error(
-          `no active policy for member ${input.memberId} on ${input.serviceDate}`,
+        throw new ClaimIntakeError(
+          "memberId",
+          "MEMBER_NOT_FOUND",
+          `no policy on file for member ${input.memberId}`,
         );
       }
       const planYear = String(policy.planYear);

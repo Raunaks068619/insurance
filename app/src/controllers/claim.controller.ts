@@ -6,9 +6,10 @@
 
 import type { FastifyReply, FastifyRequest } from "fastify";
 import type { ClaimReadService } from "../services/claim-read.service";
-import type {
-  AdjudicateClaimInput,
-  ClaimService,
+import {
+  type AdjudicateClaimInput,
+  ClaimIntakeError,
+  type ClaimService,
 } from "../services/claim.service";
 
 export type ClaimControllerDeps = {
@@ -18,12 +19,25 @@ export type ClaimControllerDeps = {
 
 export function createClaimController(deps: ClaimControllerDeps) {
   return {
-    // POST /claims — submit + adjudicate, then return the freshly-built claim snapshot.
+    // POST /claims — submit + adjudicate, then return the freshly-built claim snapshot. An
+    // unresolvable member is an intake reject (400); any other throw falls through to the central
+    // handler (500). Adjudication denials are NOT errors — they come back inside the 201 snapshot.
     submit(request: FastifyRequest, reply: FastifyReply) {
       const input = request.body as AdjudicateClaimInput;
-      const { claimId } = deps.claimService.adjudicateClaim(input);
-      const snapshot = deps.claimReadService.getClaimById(claimId);
-      return reply.code(201).send(snapshot);
+      try {
+        const { claimId } = deps.claimService.adjudicateClaim(input);
+        const snapshot = deps.claimReadService.getClaimById(claimId);
+        return reply.code(201).send(snapshot);
+      } catch (err) {
+        if (err instanceof ClaimIntakeError) {
+          return reply.code(400).send({
+            errors: [
+              { field: err.field, code: err.code, message: err.message },
+            ],
+          });
+        }
+        throw err;
+      }
     },
 
     // GET /claims/:id — return the claim snapshot, or 404 when no such claim exists.
