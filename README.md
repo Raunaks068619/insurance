@@ -49,6 +49,21 @@ only via explicit accessors (`findClaimPhi`, `findMemberById`).
 
 ---
 
+## Submission Deliverables
+
+| Deliverable | Where to find it |
+|---|---|
+| `.git` folder + commit history | Root of the zip — 10 commits, TDD trail visible |
+| JSONL session logs (35 sessions) | [`ai-artifacts/`](ai-artifacts/) — all raw Claude Code sessions, unedited |
+| README | This file |
+| Domain model | [`docs/domain-model.md`](docs/domain-model.md) — entities, state machines, worked numeric examples |
+| Decisions | [`docs/decisions.md`](docs/decisions.md) — 29 numbered decisions with rationale and trade-offs |
+| Self-review | [`docs/self-review.md`](docs/self-review.md) — honest gap-list, confidence calibration |
+| Working system | `pnpm install && pnpm start` — auto-seeds, starts on `:3000` |
+| Tests | `pnpm test` — 73 tests, all encoding domain behavior |
+
+---
+
 ## The 3 Endpoints
 
 | Method | Path | What it does |
