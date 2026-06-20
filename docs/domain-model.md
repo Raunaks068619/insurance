@@ -82,7 +82,7 @@ at adjudication.
 ## Coverage rule shape
 
 Rules are typed config data, not code and not a DSL. Shape grounded in research across
-UnitedHealthcare, Aetna, Cigna, BCBS, and ACA structure (`ai-artifacts/02-domain-research/`):
+UnitedHealthcare, Aetna, Cigna, BCBS, and ACA structure (`JSONL_session_logs/02-domain-research/`):
 
 ```ts
 type CoverageRule = {

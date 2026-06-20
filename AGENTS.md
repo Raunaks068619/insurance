@@ -33,8 +33,8 @@ Use the `/start-session` command to do this ritual in order.
    stop and raise it — do not silently expand.
 3. **Session ritual is mandatory.** Every session opens with `/start-session` and closes
    with `/end-session`. Closing a session without copying the JSONL into
-   `ai-artifacts/{phase}/` is a process failure — the JSONL is a graded deliverable.
-4. **JSONL belongs in `ai-artifacts/{phase}/`.** Every phase (framing, domain research,
+   `JSONL_session_logs/{phase}/` is a process failure — the JSONL is a graded deliverable.
+4. **JSONL belongs in `JSONL_session_logs/{phase}/`.** Every phase (framing, domain research,
    design, coding, testing, docs, QA) must have at least one raw `.jsonl` log. No JSONL =
    submission rejected. Markdown summaries do not substitute.
 5. **Money is integer cents.** Never floats for money. Ever.
@@ -75,7 +75,7 @@ docs/
   domain-model.md             # deliverable: entities, state machines, aggregation
   decisions.md                # deliverable: what/why/skipped, assumptions
   self-review.md              # deliverable: honest gap-list
-ai-artifacts/
+JSONL_session_logs/
   README.md                   # map of the JSONL audit trail
   01-framing/ … 07-qa/        # raw .jsonl per phase
 project-docs/                 # the original assignment brief (reference, do not edit)
@@ -114,7 +114,7 @@ Never skip the red step. Never `--no-verify`.
 - **Open:** `/start-session` — read the four files in order, run git status/log, declare
   session intent (phase, focus, reads, open questions), confirm the TDD rule verbatim.
 - **Close:** `/end-session` — append a session-log row to `TRACK.md`, update current
-  focus, log any decisions, copy this session's `.jsonl` into `ai-artifacts/{phase}/`,
+  focus, log any decisions, copy this session's `.jsonl` into `JSONL_session_logs/{phase}/`,
   commit with a `chore:` message.
 
 ## What "done" means per deliverable
@@ -125,7 +125,7 @@ Never skip the red step. Never `--no-verify`.
 | `docs/domain-model.md` | Entities, both state machines, aggregation logic, and rule shape documented and matching the code. |
 | `docs/decisions.md` | Every non-obvious choice has a stated trade-off; assumptions explicit. |
 | `docs/self-review.md` | Calibrated gap-list: what's thin, what's skipped, why, and what you'd do next. Matches reality. |
-| `ai-artifacts/` | At least one raw `.jsonl` per phase folder 01–07. |
+| `JSONL_session_logs/` | At least one raw `.jsonl` per phase folder 01–07. |
 | `README.md` | A reviewer can clone, install, seed, test, and run without asking a question. |
 
 ## Anti-patterns (auto-reject)

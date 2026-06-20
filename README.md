@@ -54,13 +54,13 @@ only via explicit accessors (`findClaimPhi`, `findMemberById`).
 | Deliverable | Where to find it |
 |---|---|
 | `.git` folder + commit history | Root of the zip — 10 commits, TDD trail visible |
-| JSONL session logs (35 sessions) | [`ai-artifacts/`](ai-artifacts/) — all raw Claude Code sessions, unedited |
+| JSONL session logs (35 sessions) | [`JSONL_session_logs/`](JSONL_session_logs/) — all raw Claude Code sessions, unedited |
 | README | This file |
 | Domain model | [`docs/domain-model.md`](docs/domain-model.md) — entities, state machines, worked numeric examples |
 | Decisions | [`docs/decisions.md`](docs/decisions.md) — 29 numbered decisions with rationale and trade-offs |
 | Self-review | [`docs/self-review.md`](docs/self-review.md) — honest gap-list, confidence calibration |
 | Working system | `pnpm install && pnpm start` — auto-seeds, starts on `:3000` |
-| Tests | `pnpm test` — 73 tests, all encoding domain behavior |
+| Tests | `pnpm test` — 79 tests, all encoding domain behavior |
 
 ---
 
@@ -514,7 +514,7 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3000/claims \
 | 4 | `app/src/domain/adjudication/adjudicator.ts` | The core engine (pure function, 235 lines) |
 | 5 | `app/tests/adjudicate-line.test.ts` | 21 unit tests — the domain behavior spec |
 | 6 | `app/src/` | Services, repositories, HTTP layer |
-| 7 | `ai-artifacts/` | Raw JSONL session logs by phase |
+| 7 | `JSONL_session_logs/` | Raw JSONL session logs by phase |
 
 ---
 
@@ -550,6 +550,6 @@ docs/
   decisions.md     21 numbered decisions with rationale
   self-review.md   honest gap-list
 
-ai-artifacts/      raw JSONL session logs — 35 Claude Code sessions, unedited
+JSONL_session_logs/      raw JSONL session logs — 35 Claude Code sessions, unedited
 project-docs/      original assignment brief (do not edit)
 ```

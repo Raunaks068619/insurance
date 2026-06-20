@@ -1,5 +1,5 @@
 ---
-description: Session-close ritual — update TRACK.md, persist this session's JSONL into ai-artifacts/{phase}/, commit.
+description: Session-close ritual — update TRACK.md, persist this session's JSONL into JSONL_session_logs/{phase}/, commit.
 ---
 
 # /end-session
@@ -30,7 +30,7 @@ complete. The JSONL copy is mandatory — a commit without it is a process failu
 Filename pattern: `{YYYY-MM-DD}_{agent}_{short-description}.jsonl`
 
 ```bash
-cp <source>.jsonl ai-artifacts/<current-phase>/2026-06-18_claude_<short-description>.jsonl
+cp <source>.jsonl JSONL_session_logs/<current-phase>/2026-06-18_claude_<short-description>.jsonl
 ```
 
 Examples of `<agent>`: `claude`, `codex`, `cursor`. `<current-phase>` is one of
@@ -49,4 +49,4 @@ Verify the JSONL is staged in the commit before finishing.
 
 - Editing `PRD.md` (scope is locked).
 - Deleting or rewriting existing session-log rows (append only).
-- Committing without copying this session's JSONL into `ai-artifacts/{phase}/`.
+- Committing without copying this session's JSONL into `JSONL_session_logs/{phase}/`.

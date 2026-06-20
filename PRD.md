@@ -86,7 +86,7 @@ loaded by a seed script, not via the API.
 
 ## Coverage rule shape (v1) — grounded in real-insurer research
 
-Coverage rules are typed config records (see `ai-artifacts/02-domain-research/`). Shape:
+Coverage rules are typed config records (see `JSONL_session_logs/02-domain-research/`). Shape:
 
 ```ts
 type CoverageRule = {
