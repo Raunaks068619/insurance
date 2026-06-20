@@ -303,6 +303,50 @@ cross-claim fingerprint check has no triggering DB test yet and is deferred.
 **Reversible?:** Yes — the entrypoint can split later; the duplicate check slots in behind the same
 fingerprint the writeback already computes.
 
+### 20 — Status-transition log: one `setStatus()` chokepoint + a per-claim seq clock
+
+> **Status: IMPLEMENTED** (cycles 28–31 — implements the decision #15 design).
+
+**Chose:** A single `setStatus()` chokepoint updates the entity's status column **and** appends a
+`status_transitions` row in the **same write**, so the log can never drift from the columns. `seq` is a
+**per-claim logical clock** (`claims.claim_seq` is its head, bumped via `claims.bumpClaimSeq`), giving
+the merged `GET /claims/:id` timeline a deterministic total order. `adjudicateClaim` was refactored to
+**two phases** — persist+SUBMIT every line, then adjudicate+ADJUDICATE every line — so the log reads as
+a clean `claim SUBMIT → line SUBMITs → line ADJUDICATEDs → claim AGGREGATED` ordered set. Disputes log
+the reopen (`DENIED → NEEDS_REVIEW`, actor `MEMBER`, reason `DISPUTE_REOPEN`) and the auto
+re-adjudication. Both services route every status change through the injected chokepoint.
+**Over:** (a) writing the status column and the transition separately (they could drift); (b) a global
+`seq` counter (non-deterministic across claims — a per-claim clock re-runs identically); (c) interleaved
+submit/adjudicate per line (the two-phase order is the faithful intake-then-adjudication timeline).
+**Trade-off:** Re-runs reproduce identical rows except `id` + `created_at` (cycle 30 compares modulo
+those). The chokepoint adds one small write per transition. The log is a parallel audit trail — status
+columns stay the source of truth (not event-sourced).
+**Reversible?:** Yes — additive; the log can be dropped without touching adjudication.
+
+### 21 — Dispute flow: accumulator net-out, 4-value outcome, and `DisputeError` guards
+
+> **Status: IMPLEMENTED** (cycles 27, 32–36 — implements decisions #16 / #21–#23).
+
+**Chose:** `disputeService.open({ lineItemId, reason, corrected? })` re-adjudicates the disputed line
+against **current** rules + corrected facts and a working snapshot of `current accumulator − this line's
+own original deltas` (**net-out**), then writes the result back so each dimension =
+`netted + new deltas`. It APPENDS a new adjudication at a higher `seq` (the original row is immutable),
+resolves a **4-value outcome** by diffing new vs original (`UPHELD` / `OVERTURNED` /
+`PARTIALLY_OVERTURNED` / `MODIFIED`), and **guards** with a typed `DisputeError`: a missing/mismatched
+line → `NOT_FOUND` (HTTP 404), a non-terminal (`PENDING`/`NEEDS_REVIEW`) line → `CONFLICT` (HTTP 409).
+**Over:** (a) blind delta-reversal on re-adjudication — corrupts shared accumulators once later claims
+have advanced them (double-counts the deductible / drives OOP negative); (b) a whole-claim recompute —
+re-touches undisputed sibling lines (out of scope, documented); (c) representing 404/409 as adjudication
+*decisions* — they are identity/state **errors** (4xx), distinct from a denial (HTTP 200), per the
+decision-vs-error boundary (#16).
+**Trade-off:** The net-out keeps the invariant *each dimension = Σ of every line's **latest** deltas* —
+proven by cycle 35 (a corrected-billed re-price leaves the dimension at the new value, never
+original+new). `DisputeError` carries a `code` the controller maps to an HTTP status; the service stays
+transport-agnostic. **Known limitation:** single-line scope — an intervening sibling line decided
+against the pre-dispute accumulator is not recomputed (decision #16).
+**Reversible?:** Yes — a reviewer/override path and a cross-claim cascade can layer on later; the
+outcome diff and guards are isolated in the dispute service.
+
 ---
 
 ## Decisions resolved this framing session
