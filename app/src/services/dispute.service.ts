@@ -4,10 +4,11 @@
 // the raw connection. Layering: service → repositories → db. Every status change routes through the
 // injected setStatus() chokepoint.
 //
-// Cycle 27 — open() re-adjudicates a disputed line against current rules + corrected facts, APPENDS a
-// new immutable decision at a higher seq, and PRESERVES the original. Cycle 31 — it logs the reopen
-// (terminal → NEEDS_REVIEW, MEMBER) and the auto re-adjudication. The accumulator net-out (35) and
-// full guard set (36) arrive in their cycles.
+// A dispute is synchronous (open → re-adjudicate → resolve, one transaction). It re-adjudicates the
+// disputed line against CURRENT rules + corrected facts and a working snapshot of
+// `current accumulator − this line's own original deltas` (net-out — decision #16), APPENDS a new
+// immutable decision (the original is preserved), and resolves to a 4-value outcome. Guards: a
+// missing line → NOT_FOUND (404); a non-terminal line → CONFLICT (409).
 
 import { adjudicateLine } from "../domain/adjudication/adjudicator";
 import type { ReasonCode } from "../domain/reason-codes";
@@ -23,6 +24,18 @@ import type {
 } from "../repositories/dispute.repository";
 import type { PolicyRepository } from "../repositories/policy.repository";
 import type { SetStatus } from "./set-status";
+
+export type DisputeErrorCode = "NOT_FOUND" | "CONFLICT";
+
+// A dispute identity/state failure (4xx) — distinct from an adjudication decision (HTTP 200).
+export class DisputeError extends Error {
+  readonly code: DisputeErrorCode;
+  constructor(code: DisputeErrorCode, message: string) {
+    super(message);
+    this.code = code;
+    this.name = "DisputeError";
+  }
+}
 
 export type DisputeServiceDeps = {
   claims: ClaimRepository;
@@ -72,15 +85,30 @@ export function createDisputeService(deps: DisputeServiceDeps) {
   function open(input: OpenDisputeInput): OpenDisputeResult {
     return deps.withTransaction(() => {
       const line = deps.claims.findLineById(input.lineItemId);
-      if (!line) throw new Error(`line item not found: ${input.lineItemId}`);
+      if (!line) {
+        throw new DisputeError(
+          "NOT_FOUND",
+          `line item not found: ${input.lineItemId}`,
+        );
+      }
+      // Only a terminal line is disputable (decision #16); PENDING / NEEDS_REVIEW → 409.
+      if (line.status !== "APPROVED" && line.status !== "DENIED") {
+        throw new DisputeError(
+          "CONFLICT",
+          `line ${input.lineItemId} is not in a terminal state (${line.status})`,
+        );
+      }
       const original = deps.adjudications.currentForLine(input.lineItemId);
-      if (!original)
-        throw new Error(
+      if (!original) {
+        throw new DisputeError(
+          "NOT_FOUND",
           `no adjudication to dispute for line ${input.lineItemId}`,
         );
+      }
 
       const claim = deps.claims.findClaimById(line.claimId);
-      if (!claim) throw new Error(`claim not found: ${line.claimId}`);
+      if (!claim)
+        throw new DisputeError("NOT_FOUND", `claim not found: ${line.claimId}`);
       const policy = deps.policies.findActiveForMember(
         claim.memberId,
         claim.serviceDate,
@@ -106,16 +134,28 @@ export function createDisputeService(deps: DisputeServiceDeps) {
         reason: "DISPUTE_REOPEN",
       });
 
-      // Overlay the corrected facts (the only amendable line fields) and re-adjudicate against
-      // current rules. The net-out of the original deltas is a no-op when the disputed decision
-      // contributed nothing (e.g. a denial); it is exercised rigorously at cycle 35.
+      // Overlay the corrected facts (the only amendable line fields).
       const corrected = input.corrected ?? {};
+      const origService = line.serviceCode;
       const effServiceCode = corrected.serviceCode ?? line.serviceCode;
       const effBilledCents = corrected.billedCents ?? line.billedCents;
       const effUnits = corrected.units ?? line.units;
       const effPriorAuth = corrected.priorAuthPresent ?? line.priorAuthPresent;
 
+      // Net-out: re-adjudicate against `current accumulator − this line's own original deltas`, so
+      // the disputed line contributes exactly once (at its newest decision). Invariant: each
+      // dimension = Σ of every line's latest deltas — the deductible never double-counts.
       const acc = deps.accumulators.snapshot(claim.memberId, planYear);
+      const od = original.deltas;
+      const nettedDeductible = acc.deductibleMetCents - od.deductibleIncCents;
+      const nettedOop = acc.oopMetCents - od.oopIncCents;
+      const nettedLimitOrig =
+        (acc.limitUsedByService[origService] ?? 0) - od.limitInc;
+      const nettedLimitEff =
+        effServiceCode === origService
+          ? nettedLimitOrig
+          : (acc.limitUsedByService[effServiceCode] ?? 0);
+
       const result = adjudicateLine({
         line: {
           id: line.id,
@@ -131,12 +171,13 @@ export function createDisputeService(deps: DisputeServiceDeps) {
         rule: ruleByService.get(effServiceCode),
         serviceDate: claim.serviceDate,
         acc: {
-          deductibleMetCents: acc.deductibleMetCents,
-          oopMetCents: acc.oopMetCents,
-          limitUsed: acc.limitUsedByService[effServiceCode] ?? 0,
+          deductibleMetCents: nettedDeductible,
+          oopMetCents: nettedOop,
+          limitUsed: nettedLimitEff,
         },
         alreadyAdjudicated: false,
       });
+      const nd = result.deltas;
 
       // Append the NEW decision at a higher seq — the original row is never touched (append-only).
       const newStatus = result.status as "APPROVED" | "DENIED";
@@ -150,7 +191,7 @@ export function createDisputeService(deps: DisputeServiceDeps) {
         memberResponsibilityCents: result.memberResponsibilityCents,
         reasons: result.reasons,
         explanation: result.explanation,
-        deltas: result.deltas,
+        deltas: nd,
       });
       // Auto re-adjudication clears NEEDS_REVIEW back to a terminal line state.
       deps.setStatus({
@@ -160,6 +201,49 @@ export function createDisputeService(deps: DisputeServiceDeps) {
         actor: "SYSTEM",
         reason: "ADJUDICATED",
       });
+
+      // Write back the net-out: final = (current − original deltas) + new deltas, per touched dimension.
+      const limitUnitOf = (svc: string): "CENTS" | "COUNT" =>
+        ruleByService.get(svc)?.limit.unit === "visits" ? "COUNT" : "CENTS";
+      if (od.deductibleIncCents > 0 || nd.deductibleIncCents > 0) {
+        deps.accumulators.upsert({
+          memberId: claim.memberId,
+          planYear,
+          dimension: "DEDUCTIBLE",
+          unit: "CENTS",
+          usedCents: nettedDeductible + nd.deductibleIncCents,
+          usedCount: 0,
+        });
+      }
+      if (od.oopIncCents > 0 || nd.oopIncCents > 0) {
+        deps.accumulators.upsert({
+          memberId: claim.memberId,
+          planYear,
+          dimension: "OOP",
+          unit: "CENTS",
+          usedCents: nettedOop + nd.oopIncCents,
+          usedCount: 0,
+        });
+      }
+      const upsertLimit = (svc: string, used: number) => {
+        const unit = limitUnitOf(svc);
+        deps.accumulators.upsert({
+          memberId: claim.memberId,
+          planYear,
+          dimension: `LIMIT:${svc}`,
+          unit,
+          usedCents: unit === "CENTS" ? used : 0,
+          usedCount: unit === "COUNT" ? used : 0,
+        });
+      };
+      if (effServiceCode === origService) {
+        if (od.limitInc > 0 || nd.limitInc > 0)
+          upsertLimit(origService, nettedLimitOrig + nd.limitInc);
+      } else {
+        if (od.limitInc > 0) upsertLimit(origService, nettedLimitOrig); // removed from the old service
+        if (nd.limitInc > 0)
+          upsertLimit(effServiceCode, nettedLimitEff + nd.limitInc);
+      }
 
       // Re-aggregate the claim from every line's current decision.
       const claimStatus = aggregateClaimStatus(
