@@ -125,14 +125,16 @@ Each policy has one coverage rule per service. A rule controls three things:
 **Intake rejects (HTTP 400 — nothing persisted):**
 - Unknown `memberId` (member has no policy on file)
 - Missing or malformed fields
-- `billedCents` not a positive integer
+- `billedCents` not a positive integer, or above the per-line cap (`10_000_000_000` = $100,000,000)
 - `serviceDate` in the future or invalid format
 
 **Adjudication denials (HTTP 201 — processed, reason explained):**
 - `POLICY_NOT_ACTIVE`, `NO_COVERAGE`, `EXCLUDED`, `PRIOR_AUTH_REQUIRED`, `LIMIT_EXCEEDED`
 - A denied line is a processed decision, not an error
 
-> `priorAuthPresent` defaults to `true` when omitted. Send `false` explicitly to trigger `PRIOR_AUTH_REQUIRED`.
+> **`priorAuthPresent` is fail-closed: it defaults to `false` when omitted** (absence = auth not
+> obtained). A service that `requiresPriorAuth` denies `PRIOR_AUTH_REQUIRED` unless you send
+> `priorAuthPresent: true`. An out-of-range `billedCents` is an intake reject (400), never a denial.
 
 **Accepted service codes (12):**
 `PREVENTIVE` · `PCP_VISIT` · `SPECIALIST_VISIT` · `URGENT_CARE` · `EMERGENCY_ROOM` · `LAB` · `MRI` · `OUTPATIENT_SURGERY` · `INPATIENT_HOSPITAL` · `PHYSICAL_THERAPY` · `CHIROPRACTIC` · `ADULT_DENTAL`
@@ -224,9 +226,12 @@ curl -s -X POST http://localhost:3000/claims \
 
 ---
 
-### Flow 2 — Prior auth denial
+### Flow 2 — Prior auth denial (fail-closed default)
 
 **Member:** `mem_prior_auth` · Rule: MRI requires prior auth
+
+`priorAuthPresent` is **omitted** below — and because the default is fail-closed (`false`), the line
+denies. Re-send with `"priorAuthPresent": true` to see it approve (or open a dispute — Flow 9).
 
 ```bash
 curl -s -X POST http://localhost:3000/claims \
@@ -234,7 +239,7 @@ curl -s -X POST http://localhost:3000/claims \
   -d '{
     "memberId": "mem_prior_auth",
     "serviceDate": "2026-06-01",
-    "lineItems": [{ "serviceCode": "MRI", "billedCents": 100000, "priorAuthPresent": false }]
+    "lineItems": [{ "serviceCode": "MRI", "billedCents": 100000 }]
   }' | jq '{status, line: .lineItems[0] | {status, payableCents, reasons, explanation}}'
 ```
 
@@ -444,6 +449,26 @@ echo "Updated line:"    && echo "$DISPUTE" | jq '.claim.lineItems[0] | {status, 
 ```
 
 **Expected after dispute:** `outcome: OVERTURNED` · line `APPROVED` · plan pays $400 (20% coinsurance on $500 remainder after $500 deductible draw)
+
+---
+
+### Flow 10 — Intake reject (out-of-range amount)
+
+An amount above the per-line cap is **structurally invalid** — rejected at the edge (HTTP 400),
+never persisted, never adjudicated. This is the mirror of the `billedCents ≥ 1` lower bound; it is
+*not* an adjudication denial (there is no insurance reason code for "amount too large").
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST http://localhost:3000/claims \
+  -H 'content-type: application/json' \
+  -d '{
+    "memberId": "mem_approved",
+    "serviceDate": "2026-06-01",
+    "lineItems": [{ "serviceCode": "PCP_VISIT", "billedCents": 100000000001 }]
+  }'
+```
+
+**Expected:** `400` · `{ "errors": [{ "field": "lineItems.0.billedCents", "code": "maximum", … }] }`
 
 ---
 

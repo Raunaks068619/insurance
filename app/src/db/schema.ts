@@ -89,7 +89,7 @@ export const lineItems = sqliteTable("line_items", {
   units: integer("units").notNull().default(1),
   priorAuthPresent: integer("prior_auth_present", { mode: "boolean" })
     .notNull()
-    .default(true),
+    .default(false), // fail-closed: absence = auth NOT obtained (mirrors schema.sql DEFAULT 0)
   status: text("status").$type<LineItemStatus>().notNull().default("PENDING"),
   fingerprint: text("fingerprint").notNull(),
   createdAt: text("created_at").notNull().default(nowDefault),

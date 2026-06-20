@@ -8,7 +8,7 @@ export type LineItem = {
   serviceCode: string;
   billedCents: number; // positive integer cents (allowed == billed in v1)
   units: number;
-  priorAuthPresent: boolean; // default true (absence = auth present)
+  priorAuthPresent: boolean; // default false (absence = auth NOT obtained, fail-closed)
   status: LineItemStatus;
   fingerprint: string; // memberId + serviceCode + serviceDate + billedCents
 };

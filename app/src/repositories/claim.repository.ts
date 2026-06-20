@@ -81,7 +81,9 @@ export function createClaimRepository(db: Db) {
     insertLine(claimId: string, l: NewLine): PersistedLine {
       const id = randomUUID(); // status defaults to PENDING
       const units = l.units ?? 1;
-      const priorAuthPresent = l.priorAuthPresent ?? true;
+      // Fail-closed: an omitted priorAuthPresent means auth was NOT obtained, so a prior-auth
+      // service denies PRIOR_AUTH_REQUIRED rather than silently paying (reversed default).
+      const priorAuthPresent = l.priorAuthPresent ?? false;
       db.insert(lineItems)
         .values({
           id,

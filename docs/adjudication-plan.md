@@ -105,8 +105,9 @@ end at `APPROVED` / `PARTIALLY_APPROVED` / `DENIED` (decision #14).
 - **Malformed / identity-failed input is an error** → HTTP **4xx** at intake (C2), nothing
   persisted. (Bad shape, non-integer cents, future date, unknown member.)
 - **Prior-auth missing is a decision, not an error** → 200 + a `DENIED` line carrying
-  `PRIOR_AUTH_REQUIRED` and an explanation. `prior_auth_present` defaults to `true` on input
-  (absence = auth present); the denial path is triggered only by an explicit `false`.
+  `PRIOR_AUTH_REQUIRED` and an explanation. `prior_auth_present` is **fail-closed**: it defaults to
+  `false` on input (absence = auth NOT obtained), so the denial path triggers unless the caller sends
+  an explicit `true`. (Decision #22 reverses the original `true` default, #13.)
 
 ## Determinism (snapshot-then-writeback)
 

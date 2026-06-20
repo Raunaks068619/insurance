@@ -39,6 +39,8 @@ export const aLineItem = (overrides: Partial<LineItem> = {}): LineItem => ({
   serviceCode: "PREVENTIVE",
   billedCents: 12_000, // $120.00 — integer cents, never a float
   units: 1,
+  // A fully-valid fixture line asserts auth WAS obtained. NOTE: production defaults an OMITTED
+  // priorAuthPresent to `false` (fail-closed, decision #22) — prior-auth tests set this explicitly.
   priorAuthPresent: true,
   status: "PENDING",
   fingerprint: "mem_test_1|PREVENTIVE|2026-06-19|12000",

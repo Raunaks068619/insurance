@@ -3,6 +3,8 @@
 // A dispute carries a member rationale (surfaced verbatim) and OPTIONAL corrected facts — the only
 // amendable line fields (prior auth / service code / billed / units). Validated before the handler.
 
+import { MAX_BILLED_CENTS } from "../../domain/money/cents";
+
 export const disputeBodySchema = {
   type: "object",
   additionalProperties: false,
@@ -15,7 +17,7 @@ export const disputeBodySchema = {
       properties: {
         priorAuthPresent: { type: "boolean" },
         serviceCode: { type: "string", minLength: 1 },
-        billedCents: { type: "integer", minimum: 1 },
+        billedCents: { type: "integer", minimum: 1, maximum: MAX_BILLED_CENTS },
         units: { type: "integer", minimum: 1 },
       },
     },

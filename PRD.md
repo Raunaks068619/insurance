@@ -157,7 +157,7 @@ type LineItem = {
   service_code: string;         // closed catalog; unlisted → NO_COVERAGE (at C3)
   billed_cents: number;         // positive integer
   units: number;                // default 1
-  prior_auth_present: boolean;  // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
+  prior_auth_present: boolean;  // default false (absence = auth NOT obtained, fail-closed); denies PRIOR_AUTH_REQUIRED unless explicit true
   status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW (no PAID in v1)
   fingerprint: string;          // member_id + service_code + service_date + billed_cents
 };
@@ -203,7 +203,7 @@ adjudication deny (`POLICY_NOT_ACTIVE`).
 3. **In-network only for v1.** Out-of-network is modeled as either not-covered or a separate rule set if time permits; default assumption documented in `TRACK.md`.
 4. **Allowed amount == billed amount.** No fee schedule / provider-negotiated rate lookup; the billed amount is treated as the allowed amount. A real system would apply a fee schedule first.
 5. **Plan year is a fixed calendar window on the policy.** Accumulator periods align to the policy's plan-year boundaries, not a rolling window.
-6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. `prior_auth_present` defaults to `true` (absence = auth present); if a rule requires it and the line is explicitly `false`, the line is a clean `DENIED` with `PRIOR_AUTH_REQUIRED`, payable 0.
+6. **Prior authorization is a boolean precondition** recorded on the claim/line item, not a separate workflow. `prior_auth_present` is **fail-closed**: it defaults to `false` (absence = auth NOT obtained), so if a rule requires it the line is a clean `DENIED` with `PRIOR_AUTH_REQUIRED` (payable 0) unless the caller explicitly sends `true`. (Decision #22 reverses the original `true` default, #13.)
 7. **Disputes are first-class and member-initiated** (decision #16): disputable from any *terminal* line, carrying optional corrected facts (`prior_auth_present`/`service_code`/`billed_cents`/`units`); re-adjudicated synchronously against current rules and `current accumulator − this line's own original deltas` (single-line net-out; no cross-claim cascade); the original decision is preserved immutably; the dispute resolves to `UPHELD | OVERTURNED | PARTIALLY_OVERTURNED | MODIFIED`. No human-reviewer queue; `DISPUTED_OVERRIDE` reserved for v2.
 8. **Determinism over wall-clock.** Adjudication reads a snapshot of accumulators; concurrency control beyond SQLite's single-writer model is out of scope and noted.
 9. **One cost-share mechanism per service.** Each rule is `full_coverage`, `copay`, or `coinsurance` — not a stack. The real copay-then-coinsurance case (ER, some urgent care) is approximated by its dominant component and documented as a known simplification.

@@ -105,6 +105,47 @@ describe("disputeService.open — no corrected facts → UPHELD (cycle 33)", () 
   });
 });
 
+describe("disputeService.open — prior-auth denial via fail-closed default, no corrections → UPHELD", () => {
+  it("re-adjudicates a PRIOR_AUTH_REQUIRED denial (priorAuthPresent omitted at submit) to the same denial", () => {
+    const { db, sqlite } = freshDb();
+    const { memberId } = seedWorld(db, {
+      rules: [
+        {
+          serviceCode: "MRI",
+          costShare: { type: "coinsurance", rate: 0.2 },
+          appliesDeductible: true,
+          requiresPriorAuth: true,
+        },
+      ],
+    });
+    // priorAuthPresent OMITTED → fail-closed default (false) → DENIED PRIOR_AUTH_REQUIRED.
+    makeClaimService({ db, sqlite }).adjudicateClaim({
+      memberId,
+      serviceDate: "2026-06-19",
+      lineItems: [{ serviceCode: "MRI", billedCents: 90_000 }],
+    });
+
+    // No corrected facts → the stored (false) prior-auth value re-denies → UPHELD. Proves the
+    // fail-closed default survives the dispute re-adjudication path, not just first adjudication.
+    const result = makeDisputeService({ db, sqlite }).open({
+      lineItemId: lineId(sqlite),
+      reason: "please re-review",
+    });
+
+    expect(result.outcome).toBe("UPHELD");
+    const adjs = sqlite
+      .prepare(
+        "SELECT seq, status, reasons_json FROM adjudications ORDER BY seq",
+      )
+      .all() as { seq: number; status: string; reasons_json: string }[];
+    expect(adjs).toHaveLength(2); // original preserved + new decision appended
+    expect(adjs[1]?.status).toBe("DENIED");
+    expect(JSON.parse(adjs[1]?.reasons_json ?? "[]")).toContain(
+      "PRIOR_AUTH_REQUIRED",
+    );
+  });
+});
+
 describe("disputeService.open — corrected billed keeps APPROVED but changes numbers → MODIFIED (cycle 34)", () => {
   it("a corrected billed amount re-prices the same APPROVED line → MODIFIED", () => {
     const { db, sqlite } = freshDb();

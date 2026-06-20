@@ -54,7 +54,7 @@ type LineItem = {
   serviceCode: string;          // closed 12-entry catalog; unlisted → NO_COVERAGE
   billedCents: number;          // positive integer (allowed == billed in v1)
   units: number;                // default 1
-  priorAuthPresent: boolean;    // default true (absence = auth present); explicit false → PRIOR_AUTH_REQUIRED
+  priorAuthPresent: boolean;    // default false (absence = auth NOT obtained, fail-closed); denies PRIOR_AUTH_REQUIRED unless explicit true
   status: LineItemStatus;       // PENDING → APPROVED | DENIED | NEEDS_REVIEW (no PAID in v1)
   fingerprint: string;          // memberId + serviceCode + serviceDate + billedCents
 };

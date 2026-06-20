@@ -5,6 +5,8 @@
 // required fields, ≥1 line, a positive-integer billed amount, a date-shaped service_date. Identity
 // (member exists) and coverage (policy active, service covered) are resolved downstream.
 
+import { MAX_BILLED_CENTS } from "../../domain/money/cents";
+
 export const submitClaimBodySchema = {
   type: "object",
   additionalProperties: false,
@@ -23,7 +25,11 @@ export const submitClaimBodySchema = {
         required: ["serviceCode", "billedCents"],
         properties: {
           serviceCode: { type: "string", minLength: 1 },
-          billedCents: { type: "integer", minimum: 1 }, // positive integer cents
+          billedCents: {
+            type: "integer",
+            minimum: 1,
+            maximum: MAX_BILLED_CENTS,
+          }, // positive cents, capped to a safe-integer sanity bound
           units: { type: "integer", minimum: 1 },
           priorAuthPresent: { type: "boolean" },
         },

@@ -78,7 +78,7 @@ erDiagram
         TEXT service_code "free text NOT NULL (no catalog CHECK); unlisted accepted at intake, NO_COVERAGE at adj (PRD:171)"
         INTEGER billed_cents "cents; CHECK > 0 (positive)"
         INTEGER units "CHECK > 0; default 1"
-        INTEGER prior_auth_present "BOOL 0/1; default 1 (absence=present); CHECK IN (0,1)"
+        INTEGER prior_auth_present "BOOL 0/1; default 0 (absence=NOT obtained, fail-closed); CHECK IN (0,1)"
         TEXT status "ENUM PENDING|APPROVED|DENIED|NEEDS_REVIEW; PARTIALLY_APPROVED is claim-only"
         TEXT fingerprint "member_id+service_code+service_date+billed_cents; dup detection"
         TEXT created_at "ISO-8601 metadata"
@@ -224,7 +224,7 @@ erDiagram
 | `service_code` | TEXT | | NOT NULL; **free text, no catalog CHECK** | unlisted accepted at intake → `NO_COVERAGE` at adjudication (PRD:171); matched by (policy_id, service_code) |
 | `billed_cents` | INTEGER | | NOT NULL; CHECK > 0 | positive |
 | `units` | INTEGER | | NOT NULL DEFAULT 1; CHECK > 0 | positive |
-| `prior_auth_present` | INTEGER | | NOT NULL DEFAULT 1; CHECK IN (0,1) | absence = present (decision #13) |
+| `prior_auth_present` | INTEGER | | NOT NULL DEFAULT 0; CHECK IN (0,1) | absence = NOT obtained, fail-closed (decision #22, reverses #13) |
 | `status` | TEXT | | NOT NULL DEFAULT `PENDING`; CHECK IN (PENDING,APPROVED,DENIED,NEEDS_REVIEW) | PARTIALLY_APPROVED is claim-only |
 | `fingerprint` | TEXT | | NOT NULL | member_id+service_code+service_date+billed_cents |
 | `created_at` | TEXT | | NOT NULL DEFAULT now | metadata |
@@ -448,7 +448,7 @@ CREATE TABLE line_items (
   service_code       TEXT    NOT NULL,               -- FREE TEXT (no catalog CHECK); unlisted accepted at intake, NO_COVERAGE at adj (PRD:171, domain-model:66)
   billed_cents       INTEGER NOT NULL,
   units              INTEGER NOT NULL DEFAULT 1,
-  prior_auth_present INTEGER NOT NULL DEFAULT 1,
+  prior_auth_present INTEGER NOT NULL DEFAULT 0,
   status             TEXT    NOT NULL DEFAULT 'PENDING',
   fingerprint        TEXT    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

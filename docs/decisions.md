@@ -154,6 +154,8 @@ Cost: callers must read per-line status, not just the HTTP code — correct and 
 
 ### 13 — `prior_auth_present` defaults to `true` on input (absence = auth present)
 
+> ⚠️ **SUPERSEDED by #22** — reversed to fail-closed (`false`). Kept for history.
+
 **Chose:** When a line item omits `prior_auth_present`, treat it as `true`. The
 `PRIOR_AUTH_REQUIRED` denial path fires only on an explicit `false`.
 **Over:** Defaulting to `false` (absence = no auth).
@@ -356,6 +358,31 @@ against the pre-dispute accumulator is not recomputed (decision #16).
 **Reversible?:** Yes — a reviewer/override path and a cross-claim cascade can layer on later; the
 outcome diff and guards are isolated in the dispute service.
 
+### 22 — Prior auth is fail-closed; out-of-range amounts are intake rejects (reverses #13)
+
+> **Status: IMPLEMENTED** (test `app/tests/prior-auth-default.test.ts`; live-verified). Surfaced by a
+> run-the-API review: a `mem_prior_auth` MRI with `priorAuthPresent` omitted was being **APPROVED and
+> paid**, directly contradicting the seed's own demo expectation (`DENIED PRIOR_AUTH_REQUIRED`) and the
+> Q1 framing ("missing → `PRIOR_AUTH_REQUIRED`").
+
+**Chose:** `prior_auth_present` defaults to **`false`** (absence = auth NOT obtained) at all three
+layers — `schema.sql` `DEFAULT 0`, Drizzle `schema.ts` `.default(false)`, and the repository
+`?? false`. A service that `requiresPriorAuth` now denies unless the caller explicitly asserts
+`true`. Separately, `billedCents` (and a dispute's `corrected.billedCents`) gains a `maximum`
+(`MAX_BILLED_CENTS` = `10_000_000_000` ¢ = $100M) so an out-of-range amount is an **intake reject
+(HTTP 400)** — the mirror of the `minimum: 1` lower bound — never a 500 and never an adjudication
+denial. The central error handler now fails closed: unexpected (5xx) errors return a generic
+`{code:"INTERNAL_ERROR"}` instead of echoing the underlying message (which leaked DB table/column names).
+**Over:** (a) keeping #13's "absence = present" — frictionless input, but it silently bypasses a
+financial control (any omitted field = auto-authorized); (b) modelling an over-limit amount as a
+*denial* — there is no insurance reason code for "amount too large", and routing input-sanity through
+the pure adjudicator would pollute the closed `ReasonCode` enum and the decision-vs-error boundary (#16).
+**Trade-off:** Fail-closed can deny a legitimately-authorized claim whose caller forgot the flag — the
+correct bias for money movement (deny-then-dispute beats pay-in-error). The $100M cap is generous
+enough never to reject a real line yet keeps amounts well inside JS safe-integer range (bind as
+INTEGER, never REAL).
+**Reversible?:** Yes — all are localized (three one-line defaults, two schema `maximum`s, one handler).
+
 ---
 
 ## Decisions resolved this framing session
@@ -390,7 +417,7 @@ outcome diff and guards are isolated in the dispute service.
 6. Determinism over wall-clock; concurrency beyond SQLite's single-writer is out of scope.
 7. One cost-share mechanism per service; copay-then-coinsurance approximated by dominant component.
 8. Limits are unit-typed (`dollars` or `visits`); supply-window/replacement-frequency limits out of scope.
-9. `prior_auth_present` defaults to `true` on input (absence = auth present); denial fires only on explicit `false`.
+9. `prior_auth_present` is **fail-closed**: defaults to `false` on input (absence = auth NOT obtained), so a prior-auth service denies `PRIOR_AUTH_REQUIRED` unless `true` is asserted. (Reversed from the original `true` default — decision #22 supersedes #13.)
 10. Adjudication denials are decisions (HTTP 200 + reason + explanation); only malformed/identity input is HTTP 4xx.
 11. No `PAID` state / settle in v1; `paid` is a deferred v2 transition (decision #14).
 12. Every status change is recorded in an append-only status-transition log, not event-sourced (decision #15).

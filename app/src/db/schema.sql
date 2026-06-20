@@ -135,7 +135,7 @@ CREATE TABLE line_items (
   service_code       TEXT    NOT NULL,               -- FREE TEXT (no catalog CHECK); unlisted accepted at intake, NO_COVERAGE at adj (PRD:171, domain-model:66)
   billed_cents       INTEGER NOT NULL,
   units              INTEGER NOT NULL DEFAULT 1,
-  prior_auth_present INTEGER NOT NULL DEFAULT 1,
+  prior_auth_present INTEGER NOT NULL DEFAULT 0,  -- fail-closed: absence = auth NOT obtained
   status             TEXT    NOT NULL DEFAULT 'PENDING',
   fingerprint        TEXT    NOT NULL,
   created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),

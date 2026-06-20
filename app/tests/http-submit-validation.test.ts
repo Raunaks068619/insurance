@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MAX_BILLED_CENTS } from "../src/domain/money/cents";
 import { freshDb, makeApp, seedWorld } from "./db-helpers";
 
 // Intake structural validation (PRD N2): a malformed body is rejected at the edge with HTTP 400
@@ -76,5 +77,31 @@ describe("POST /claims — input validation (intake reject, N2)", () => {
 
     expect(res.statusCode).toBe(400);
     expect(fieldsOf(res.json())).toMatch(/billedCents/);
+  });
+
+  // Mirror of the lower bound: an out-of-range billed amount is an INTAKE reject (400), not a
+  // 500 (it must never reach the DB as a REAL) and not an adjudication denial.
+  it("rejects an over-limit billedCents as 400 naming the line field, and persists nothing", async () => {
+    const { handle, app, memberId } = appWithSeed();
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/claims",
+      payload: {
+        memberId,
+        serviceDate: "2026-06-19",
+        lineItems: [
+          { serviceCode: "PREVENTIVE", billedCents: MAX_BILLED_CENTS + 1 },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(400);
+    expect(fieldsOf(res.json())).toMatch(/billedCents/);
+
+    const { c } = handle.sqlite
+      .prepare("SELECT count(*) AS c FROM claims")
+      .get() as { c: number };
+    expect(c).toBe(0); // nothing entered the system
   });
 });

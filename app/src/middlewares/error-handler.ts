@@ -15,24 +15,31 @@ import { formatValidationErrors } from "./schema-validation";
 
 export function registerErrorHandler(app: FastifyInstance): void {
   app.setErrorHandler(
-    (error: FastifyError, _request: FastifyRequest, reply: FastifyReply) => {
+    (error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
       if (error.validation) {
         return reply
           .code(400)
           .send({ errors: formatValidationErrors(error.validation) });
       }
 
-      const status =
+      // An intentional client error (a 4xx thrown upstream, e.g. Fastify's bad-JSON body) keeps its
+      // code/message — that detail is safe and useful. Anything else fails closed as a GENERIC 500:
+      // the underlying message can carry internals (DB table/column names, stack hints), so it is
+      // logged server-side and never echoed to the client.
+      const isClientError =
         typeof error.statusCode === "number" &&
         error.statusCode >= 400 &&
-        error.statusCode < 500
-          ? error.statusCode
-          : 500;
-      return reply.code(status).send({
-        error: {
-          code: error.code ?? "INTERNAL_ERROR",
-          message: error.message,
-        },
+        error.statusCode < 500;
+
+      if (isClientError) {
+        return reply.code(error.statusCode as number).send({
+          error: { code: error.code ?? "BAD_REQUEST", message: error.message },
+        });
+      }
+
+      request.log.error(error); // keep the real cause for operators; no-op when logging is off
+      return reply.code(500).send({
+        error: { code: "INTERNAL_ERROR", message: "Internal server error" },
       });
     },
   );
