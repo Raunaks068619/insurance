@@ -243,7 +243,147 @@ _fill in alongside the explanation builder._
 - **Q2 out-of-network** → in-network only for v1 (allowed == billed); unlisted/OON service → `NO_COVERAGE`. Network/metal-tier/family fields omitted (change no math).
 - **Q3 accumulator period** → fixed plan-year window keyed on the policy; resets at plan-year boundary. No rolling 12-month.
 
-## Still open
+## Worked numeric examples
 
-- Worked numeric examples (above) — fill once the adjudicator lands.
-- Transition tables for both state machines — fill as the machines are implemented.
+### Example 1 — Coinsurance with deductible draw (MRI, $1,000 billed)
+
+Setup:
+- Rule: 20% coinsurance, `appliesDeductible = true`, `requiresPriorAuth = true`, priorAuth present
+- Policy: $500 deductible, $3,000 OOP max
+- Prior accumulator: `deductible_met = 0`, `oop_met = 0`
+
+Step-by-step:
+```
+allowed = billed = $1,000               (v1: allowed == billed)
+
+Step 7 — coinsurance branch:
+  remainingDeductible = max(0, 500 − 0)   = $500
+  dedPortion  = min(500, 1000)             = $500   → member owes; deductible_met += $500
+  remainder   = 1000 − 500                = $500
+  coinsPortion = round(0.20 × 500)        = $100   → member owes
+  member = 500 + 100                      = $600
+  plan   = 1000 − 600                     = $400   (computed last; sum invariant: $600 + $400 = $1,000 ✓)
+
+Step 8 — OOP cap:
+  oop_met + member share = 0 + 600 = $600 < $3,000 → no cap triggered
+
+Writeback deltas:
+  deductibleIncCents = 500
+  oopIncCents        = 600
+  limitInc           = 0     (limit: none)
+```
+
+Result: `APPROVED`, plan pays $400, member owes $600
+Reasons: `[APPROVED, DEDUCTIBLE_APPLIED, COINSURANCE_APPLIED]`
+
+---
+
+### Example 2 — Copay (PCP visit, $200 billed)
+
+Setup:
+- Rule: $25 copay, `appliesDeductible = false`
+- Prior accumulator: `deductible_met = 0`, `oop_met = 0`
+
+Step-by-step:
+```
+allowed = billed = $200
+
+Step 7 — copay branch:
+  member = min(25, 200) = $25     → copay; does NOT draw the deductible
+  plan   = 200 − 25    = $175
+
+Writeback deltas:
+  deductibleIncCents = 0          (copay branch never touches the deductible)
+  oopIncCents        = 25         (copay accrues to OOP)
+  limitInc           = 0
+```
+
+Result: `APPROVED`, plan pays $175, member owes $25
+Reasons: `[APPROVED, COPAY_APPLIED]`
+
+---
+
+### Example 3 — Visit-limit gate (Chiropractic, 13th visit when cap is 12)
+
+Setup:
+- Rule: `limit = { unit: "visits", count: 12 }`, `costShare = copay($15)`
+- Prior accumulator: `limit_used = 12` (12 visits already this plan year)
+
+Step-by-step:
+```
+Step 5 — visit limit gate:
+  limit_used (12) < count (12) → false → SHORT-CIRCUIT: LIMIT_EXCEEDED
+
+payable = 0, member = 0
+No accumulator delta (gate denials never update accumulators)
+```
+
+Result: `DENIED`, plan pays $0, member owes $0
+Reasons: `[LIMIT_EXCEEDED]`
+
+---
+
+### Example 4 — OOP maximum already met (specialist, $1,000 billed)
+
+Setup:
+- Rule: 20% coinsurance, `appliesDeductible = true`
+- Policy: $500 deductible, $3,000 OOP max
+- Prior accumulator: `deductible_met = 500`, `oop_met = 3000` (OOP max already exhausted)
+
+Step-by-step:
+```
+allowed = billed = $1,000
+
+Step 7 — coinsurance branch:
+  remainingDeductible = max(0, 500 − 500) = $0
+  dedPortion   = 0
+  coinsPortion = round(0.20 × 1000) = $200 → member owes (tentative)
+
+Step 8 — OOP cap:
+  oop_met + member = 3000 + 200 = $3,200 > $3,000
+  excess = 3200 − 3000 = $200 → refund excess to plan
+  member = 200 − 200 = $0
+  plan   = 1000 − 0 = $1,000
+```
+
+Result: `APPROVED`, plan pays $1,000, member owes $0
+Reasons: `[APPROVED, COINSURANCE_APPLIED, OOP_MAX_REACHED]`
+
+## Transition tables
+
+### Claim state transitions
+
+| From | To | Actor | Trigger |
+|---|---|---|---|
+| _(none)_ | `SUBMITTED` | `SYSTEM` | Claim persisted at intake |
+| `SUBMITTED` | `APPROVED` | `SYSTEM` | All lines approved after adjudication |
+| `SUBMITTED` | `PARTIALLY_APPROVED` | `SYSTEM` | Mixed approved + denied, or any dollar-limit straddle |
+| `SUBMITTED` | `DENIED` | `SYSTEM` | All lines denied after adjudication |
+| `APPROVED` | `UNDER_REVIEW` | `MEMBER` | Member opens a dispute on any line |
+| `PARTIALLY_APPROVED` | `UNDER_REVIEW` | `MEMBER` | Member opens a dispute on any line |
+| `DENIED` | `UNDER_REVIEW` | `MEMBER` | Member opens a dispute on any line |
+| `UNDER_REVIEW` | `APPROVED` | `SYSTEM` | Dispute auto re-adjudication resolves all lines approved |
+| `UNDER_REVIEW` | `PARTIALLY_APPROVED` | `SYSTEM` | Dispute re-adjudication produces a mix |
+| `UNDER_REVIEW` | `DENIED` | `SYSTEM` | Dispute re-adjudication produces all-denied |
+
+Note: `SUBMITTED → {APPROVED|PARTIALLY_APPROVED|DENIED}` is a single logical step in the
+implementation (submit + adjudicate + aggregate run in one transaction). The transition log records
+the full ordered sequence: claim `SUBMIT` → line `SUBMIT` (×N) → line `ADJUDICATED` (×N) →
+claim `AGGREGATED`.
+
+### Line-item state transitions
+
+| From | To | Actor | Trigger |
+|---|---|---|---|
+| _(none)_ | `PENDING` | `SYSTEM` | Line persisted at intake (phase 1 of adjudication) |
+| `PENDING` | `APPROVED` | `SYSTEM` | Line adjudicates to a covered payable |
+| `PENDING` | `DENIED` | `SYSTEM` | Line adjudicates to any denial gate or zero payable |
+| `APPROVED` | `NEEDS_REVIEW` | `MEMBER` | Member disputes this line (dispute reopen) |
+| `DENIED` | `NEEDS_REVIEW` | `MEMBER` | Member disputes this line (dispute reopen) |
+| `NEEDS_REVIEW` | `APPROVED` | `SYSTEM` | Auto re-adjudication overturns or partially changes the outcome |
+| `NEEDS_REVIEW` | `DENIED` | `SYSTEM` | Auto re-adjudication upholds the denial |
+
+Illegal transitions (e.g. `PENDING → NEEDS_REVIEW`, `APPROVED → DENIED` without a dispute) are
+rejected by the `setStatus()` guard — the service never calls `setStatus()` with an invalid
+transition, and the guard enforces this by mapping unknown `(from, to)` pairs to a thrown error at
+runtime.
